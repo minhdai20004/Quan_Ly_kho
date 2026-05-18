@@ -181,7 +181,7 @@
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.product-table, .supplier-table, .category-table, .inventory-table, .transaction-table {
+.product-table, .supplier-table, .category-table, .inventory-table, .transaction-table, .user-table {
   width: 100%;
   border-collapse: collapse;
   background: rgba(255, 255, 255, 0.9);
@@ -194,14 +194,15 @@
 .supplier-table th, .supplier-table td,
 .category-table th, .category-table td,
 .inventory-table th, .inventory-table td,
-.transaction-table th, .transaction-table td {
+.transaction-table th, .transaction-table td,
+.user-table th, .user-table td {
   border: 1px solid #e1e5e9;
   padding: 1rem;
   text-align: left;
   transition: background-color 0.3s ease;
 }
 
-.product-table th, .supplier-table th, .category-table th, .inventory-table th, .transaction-table th {
+.product-table th, .supplier-table th, .category-table th, .inventory-table th, .transaction-table th, .user-table th {
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: white;
   font-weight: 600;
@@ -213,7 +214,8 @@
 .supplier-table tbody tr:hover,
 .category-table tbody tr:hover,
 .inventory-table tbody tr:hover,
-.transaction-table tbody tr:hover {
+.transaction-table tbody tr:hover,
+.user-table tbody tr:hover {
   background: rgba(102, 126, 234, 0.05);
 }
 
@@ -327,3 +329,71 @@ button:nth-child(2):hover {
   margin: 0;
   font-weight: 500;
 }
+
+/* Consistent layout for all main views */
+.products, .categories, .suppliers, .inventory, .transactions, .users, .reports {
+  margin-left: 180px;
+  padding: 20px 25px;
+  background: #f5f6fa;
+  min-height: 100vh;
+}
+
+.inventory h1 {
+  font-size: 42px;
+  margin-bottom: 20px;
+}
+
+.inventory-summary {
+  background: #fff;
+  padding: 20px 25px;
+  border-radius: 12px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.inventory-summary h2 {
+  margin-bottom: 10px;
+}
+
+.inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.inventory-table thead {
+  background: linear-gradient(90deg, #5f6dfc, #7b4dff);
+  color: white;
+}
+
+.inventory-table th {
+  text-align: left;
+  padding: 15px;
+  font-weight: 600;
+}
+
+.inventory-table td {
+  padding: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.inventory-table tr:last-child td {
+  border-bottom: none;
+}
+
+.low-stock-alert {
+  margin-top: 30px;
+  background: #fff3cd;
+  padding: 20px;
+  border-radius: 10px;
+  border: 1px solid #ffeeba;
+}
+
+.low-stock-alert h2 {
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+

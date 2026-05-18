@@ -6,6 +6,8 @@ import Categories from './views/Categories';
 import Inventory from './views/Inventory';
 import Suppliers from './views/Suppliers';
 import Transactions from './views/Transactions';
+import Users from './views/Users';
+import Reports from './views/Reports';
 import Login from './views/Login';
 import Register from './views/Register';
 import './App.css';
@@ -45,6 +47,10 @@ function App() {
         return <Suppliers />;
       case 'transactions':
         return <Transactions />;
+      case 'users':
+        return <Users />;
+      case 'reports':
+        return <Reports />;
       case 'register':
         return <Register onRegister={() => setActiveTab('dashboard')} />;
       default:
