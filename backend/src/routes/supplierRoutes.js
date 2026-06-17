@@ -6,6 +6,9 @@ router.route('/')
   .get(supplierController.getSuppliers)
   .post(supplierController.createSupplier);
 
+// Must be BEFORE /:id to avoid route collision
+router.get('/stats', supplierController.getSupplierStats);
+
 router.route('/:supplierId/products')
   .get(supplierController.getSupplierProducts)
   .post(supplierController.addProductToSupplier);

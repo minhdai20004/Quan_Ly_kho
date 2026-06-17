@@ -1,48 +1,21 @@
 const mongoose = require('mongoose');
 
 const warehouseSchema = new mongoose.Schema({
-  warehouse_id: { type: String, unique: true, required: true },
-  name: { type: String, required: true, trim: true },
-  code: { type: String, required: true, unique: true, uppercase: true },
-  address: {
-    street: { type: String },
-    city: { type: String },
-    state: { type: String },
-    country: { type: String, default: 'Vietnam' },
-    postal_code: { type: String },
-  },
-  contact: {
-    phone: { type: String },
-    email: { type: String },
-    manager: { type: String },
-  },
-  type: {
-    type: String,
-    enum: ['main', 'branch', 'transit', 'return'],
-    default: 'branch'
-  },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'maintenance'],
-    default: 'active'
-  },
-  capacity: {
-    total: { type: Number }, // Tổng sức chứa (m³ hoặc pallet)
-    used: { type: Number, default: 0 },
-    unit: { type: String, default: 'pallet' }
-  },
-  operating_hours: {
-    open: { type: String },
-    close: { type: String }
-  },
-  is_default: { type: Boolean, default: false },
-  created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now },
+  warehouse_id:  { type: String },
+  name:          { type: String },
+  code:          { type: String },
+  address:       { type: mongoose.Schema.Types.Mixed },
+  type:          { type: String, default: 'main' },
+  status:        { type: String, enum: ['active', 'inactive'], default: 'active' },
+  capacity:      { type: mongoose.Schema.Types.Mixed },
+  is_default:    { type: Boolean, default: false },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'warehouses',
 });
 
-warehouseSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
-  next();
-});
+warehouseSchema.virtual('warehouse_name').get(function () { return this.name; });
+warehouseSchema.virtual('warehouse_code').get(function () { return this.code; });
+warehouseSchema.virtual('is_active').get(function () { return this.status === 'active'; });
 
 module.exports = mongoose.model('Warehouse', warehouseSchema);

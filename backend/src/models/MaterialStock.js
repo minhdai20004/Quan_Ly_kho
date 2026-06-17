@@ -6,42 +6,34 @@ const inventoryStockSchema = new mongoose.Schema({
   variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
   unit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductUnit' },
 
-  // Vị trí kho
   warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', required: true },
-  location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Location' }, // Có thể null nếu chưa phân bổ vị trí
+  location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Location' },
 
-  // Số lượng
-  quantity_on_hand: { type: Number, required: true, min: 0, default: 0 }, // Tồn thực tế
-  quantity_reserved: { type: Number, required: true, min: 0, default: 0 }, // Đang giữ cho đơn hàng
-  quantity_available: { type: Number, min: 0, default: 0 }, // Có thể bán = on_hand - reserved
-  quantity_in_transit: { type: Number, min: 0, default: 0 }, // Đang vận chuyển giữa kho
-  quantity_on_order: { type: Number, min: 0, default: 0 }, // Đã đặt NCC, chưa về
+  quantity_on_hand: { type: Number, required: true, min: 0, default: 0 },
+  quantity_reserved: { type: Number, required: true, min: 0, default: 0 },
+  quantity_available: { type: Number, min: 0, default: 0 },
+  quantity_in_transit: { type: Number, min: 0, default: 0 },
+  quantity_on_order: { type: Number, min: 0, default: 0 },
 
-  // Điểm đặt hàng lại
   reorder_point: { type: Number, min: 0 },
   min_stock: { type: Number, min: 0 },
   max_stock: { type: Number, min: 0 },
 
-  // Giá trị tồn kho
-  unit_cost: { type: Number }, // Giá vốn/đơn vị
-  total_cost: { type: Number }, // on_hand * unit_cost
+  unit_cost: { type: Number },
+  total_cost: { type: Number },
 
-  // Thông tin bổ sung
   last_counted_at: { type: Date },
   last_counted_qty: { type: Number },
   last_movement_at: { type: Date },
-  batch_id: { type: String }, // Liên kết đến lô (nếu quản lý lô)
+  batch_id: { type: String },
 
-  // Cảnh báo
   low_stock_alert: { type: Boolean, default: false },
   overstock_alert: { type: Boolean, default: false },
 
-  // Metadata
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });
 
-// Compound index: mỗi product+variant+unit+warehouse+location là unique
 inventoryStockSchema.index({
   product_id: 1,
   variant_id: 1,

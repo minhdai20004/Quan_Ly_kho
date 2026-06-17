@@ -906,10 +906,10 @@ const Products = ({ user }) => {
   const [detailProduct, setDetailProduct] = useState(null);
   const [searchQuery,   setSearchQuery]   = useState('');
   const [statusFilter,  setStatusFilter]  = useState('');
-  const [sortOrder,     setSortOrder]     = useState('newest');
+  const [sortOrder,     setSortOrder]     = useState('stock_asc');
   const [pagination,    setPagination]    = useState({ page: 1, total: 0, pages: 0 });
 
-  const filtersRef = useRef({ page: 1, sortOrder: 'newest', statusFilter: '', searchQuery: '' });
+  const filtersRef = useRef({ page: 1, sortOrder: 'stock_asc', statusFilter: '', searchQuery: '' });
 const unwrapResponse = (response) => response?.data?.data ?? response?.data ?? response;
 useEffect(() => {
   filtersRef.current = { page: pagination.page, sortOrder, statusFilter, searchQuery };
@@ -919,16 +919,33 @@ useEffect(() => {
     const { page, sortOrder: so, statusFilter: sf, searchQuery: sq } = filtersRef.current;
     setLoading(true); setError(null);
     try {
-      const params = { page, limit: 20, sort: 'created_at', order: so === 'newest' ? 'desc' : 'asc', ...(sf && { status: sf }), ...(sq && { search: sq }) };
+      const LIMIT = 15;
+      // Sort mặc định: stock ít nhất lên đầu — fetch tất cả rồi sort client-side
+      // Với newest/oldest dùng sort backend
+      const sortParam = so === 'newest' ? '-created_at' : so === 'oldest' ? 'created_at' : '-created_at';
+      const params = { page, limit: LIMIT, sort: sortParam, ...(sf && { status: sf }), ...(sq && { search: sq }) };
       const res = await productApi.getAll(params);
-      const payload = unwrapResponse(res);
-const list = Array.isArray(payload?.data) 
-  ? payload.data 
-  : Array.isArray(payload) 
-  ? payload 
-  : [];
-setProducts(list);
-      setPagination(prev => ({ ...prev, ...(payload?.pagination || {}) }));
+
+      // api.js dùng fetch thủ công → res là response body trực tiếp: { success, data, pagination }
+      const raw = res?.data !== undefined ? res : (res?.data ?? res);
+      const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+      const pag  = raw?.pagination || {};
+      console.log('📦 API res:', JSON.stringify({ total: pag.total, pages: pag.pages, listLen: list.length }));
+      const total = pag.total ?? list.length;
+      const pages = (pag.pages ?? Math.ceil(total / LIMIT)) || 1;
+
+      // Sort client-side theo stock
+      let sorted = [...list];
+      if (so === 'stock_asc' || so === 'newest') {
+        sorted.sort((a, b) => {
+          const qa = Array.isArray(a.stocks) ? a.stocks.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) : 0;
+          const qb = Array.isArray(b.stocks) ? b.stocks.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) : 0;
+          return so === 'stock_asc' ? qa - qb : qb - qa;
+        });
+      }
+
+      setProducts(so === 'stock_asc' || so === 'stock_desc' ? sorted : list);
+      setPagination(prev => ({ ...prev, page, total, pages }));
     } catch (err) { if (err.name !== 'AbortError') setError(err.message); }
     finally { setLoading(false); }
   }, []);
@@ -1011,7 +1028,9 @@ setProducts(list);
             <option value="">Tất cả trạng thái</option>
             {Object.entries(STATUS_MAP).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
           </select>
-          <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ padding: '0.65rem 0.75rem', border: '2px solid #d1d5db', borderRadius: '8px', background: 'white', color: '#111827', cursor: 'pointer', minWidth: '130px' }}>
+          <select value={sortOrder} onChange={e => { setSortOrder(e.target.value); setPagination(p => ({ ...p, page: 1 })); }} style={{ padding: '0.65rem 0.75rem', border: '2px solid #d1d5db', borderRadius: '8px', background: 'white', color: '#111827', cursor: 'pointer', minWidth: '160px' }}>
+            <option value="stock_asc">Tồn kho: Ít → Nhiều</option>
+            <option value="stock_desc">Tồn kho: Nhiều → Ít</option>
             <option value="newest">Mới nhất</option>
             <option value="oldest">Cũ nhất</option>
           </select>
@@ -1076,13 +1095,54 @@ setProducts(list);
         </div>
 
         {/* Pagination */}
-        {pagination.pages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginTop: '1.5rem' }}>
-            <button onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))} disabled={pagination.page === 1} style={{ padding: '0.5rem 1rem', border: '1px solid #d1d5db', borderRadius: '6px', background: 'white', cursor: pagination.page === 1 ? 'not-allowed' : 'pointer', opacity: pagination.page === 1 ? 0.5 : 1 }}>← Trước</button>
-            <span style={{ padding: '0.5rem 1rem', color: '#6b7280' }}>{pagination.page} / {pagination.pages}</span>
-            <button onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))} disabled={pagination.page === pagination.pages} style={{ padding: '0.5rem 1rem', border: '1px solid #d1d5db', borderRadius: '6px', background: 'white', cursor: pagination.page === pagination.pages ? 'not-allowed' : 'pointer', opacity: pagination.page === pagination.pages ? 0.5 : 1 }}>Sau →</button>
-          </div>
-        )}
+        {(() => {
+          const { page, pages, total } = pagination;
+          if (!pages) return null;
+          const getPageNums = () => {
+            const nums = new Set([1, pages]);
+            for (let i = Math.max(2, page - 1); i <= Math.min(pages - 1, page + 1); i++) nums.add(i);
+            return [...nums].sort((a, b) => a - b);
+          };
+          const pageNums = getPageNums();
+          const btnBase = { height: '36px', minWidth: '36px', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' };
+          const goTo = (p) => setPagination(prev => ({ ...prev, page: p }));
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid #f0f0f0', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <button onClick={() => goTo(page - 1)} disabled={page === 1}
+                  style={{ ...btnBase, padding: '0 0.875rem', opacity: page === 1 ? 0.35 : 1, cursor: page === 1 ? 'not-allowed' : 'pointer', color: '#111827' }}
+                  onMouseEnter={e => { if (page !== 1) e.currentTarget.style.background = '#f0f4ff'; }}
+                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                  ← Trước
+                </button>
+                {pageNums.map((num, i) => {
+                  const prev = pageNums[i - 1];
+                  const isActive = num === page;
+                  return (
+                    <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      {prev && num - prev > 1 && <span style={{ color: '#a0aec0', padding: '0 0.2rem' }}>…</span>}
+                      <button onClick={() => goTo(num)}
+                        style={{ ...btnBase, background: isActive ? '#6366f1' : 'white', color: isActive ? 'white' : '#374151', borderColor: isActive ? '#6366f1' : '#e2e8f0' }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f4ff'; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
+                        {num}
+                      </button>
+                    </div>
+                  );
+                })}
+                <button onClick={() => goTo(page + 1)} disabled={page === pages}
+                  style={{ ...btnBase, padding: '0 0.875rem', opacity: page === pages ? 0.35 : 1, cursor: page === pages ? 'not-allowed' : 'pointer', color: '#111827' }}
+                  onMouseEnter={e => { if (page !== pages) e.currentTarget.style.background = '#f0f4ff'; }}
+                  onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                  Sau →
+                </button>
+              </div>
+              <span style={{ fontSize: '0.82rem', color: '#718096' }}>
+                Trang <b>{page}</b>/{pages} · <b>{total}</b> sản phẩm
+              </span>
+            </div>
+          );
+        })()}
 
 {/* Modals */}
         {showAdd      && admin         && <AddProductModal  onClose={() => setShowAdd(false)}       onDone={fetchProducts} />}

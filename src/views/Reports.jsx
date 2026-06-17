@@ -32,32 +32,64 @@ const MonthlyChart = ({ transactions }) => {
   if (data.length === 0) return null;
 
   const max = Math.max(...data.flatMap(d => [d.in, d.out]), 1);
+  const CHART_H = 120;
+  const BAR_W = 28;
 
   return (
     <div style={{ background: 'white', borderRadius: '14px', padding: '1.25rem 1.5rem', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', marginBottom: '1.5rem' }}>
       <div style={{ fontWeight: '700', color: '#1a202c', marginBottom: '1rem', fontSize: '0.95rem' }}>
         📊 Biểu đồ nhập / xuất theo tháng
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.2rem', height: '130px', paddingBottom: '0.5rem' }}>
-        {data.map((d, i) => (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-            <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '3px', height: '100px' }}>
-              <div title={`Nhập: ${d.in}`} style={{
-                flex: 1, background: 'linear-gradient(180deg, #4ade80, #16a34a)',
-                borderRadius: '4px 4px 0 0', height: `${(d.in / max) * 100}%`, minHeight: d.in > 0 ? '4px' : '0',
-                transition: 'height 0.4s ease', cursor: 'default',
-              }} />
-              <div title={`Xuất: ${d.out}`} style={{
-                flex: 1, background: 'linear-gradient(180deg, #f87171, #dc2626)',
-                borderRadius: '4px 4px 0 0', height: `${(d.out / max) * 100}%`, minHeight: d.out > 0 ? '4px' : '0',
-                transition: 'height 0.4s ease', cursor: 'default',
-              }} />
+
+      {/* Chart area */}
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2rem', height: `${CHART_H + 28}px`, minWidth: `${data.length * 100}px`, paddingBottom: '0' }}>
+          {data.map((d, i) => (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: '1' }}>
+              {/* Bars */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '6px', height: `${CHART_H}px` }}>
+                {/* Nhập */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: '700', opacity: d.in > 0 ? 1 : 0 }}>{d.in}</span>
+                  <div
+                    title={`Nhập: ${d.in}`}
+                    style={{
+                      width: `${BAR_W}px`,
+                      background: 'linear-gradient(180deg, #4ade80, #16a34a)',
+                      borderRadius: '4px 4px 0 0',
+                      height: `${Math.round((d.in / max) * (CHART_H - 20))}px`,
+                      minHeight: d.in > 0 ? '4px' : '0',
+                      transition: 'height 0.4s ease',
+                      cursor: 'default',
+                    }}
+                  />
+                </div>
+                {/* Xuất */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: '700', opacity: d.out > 0 ? 1 : 0 }}>{d.out}</span>
+                  <div
+                    title={`Xuất: ${d.out}`}
+                    style={{
+                      width: `${BAR_W}px`,
+                      background: 'linear-gradient(180deg, #f87171, #dc2626)',
+                      borderRadius: '4px 4px 0 0',
+                      height: `${Math.round((d.out / max) * (CHART_H - 20))}px`,
+                      minHeight: d.out > 0 ? '4px' : '0',
+                      transition: 'height 0.4s ease',
+                      cursor: 'default',
+                    }}
+                  />
+                </div>
+              </div>
+              {/* Label tháng */}
+              <div style={{ fontSize: '0.72rem', color: '#718096', whiteSpace: 'nowrap' }}>{d.label}</div>
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#718096', whiteSpace: 'nowrap' }}>{d.label}</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.5rem' }}>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#4a5568' }}>
           <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#16a34a' }} /> Nhập kho
         </div>
@@ -77,6 +109,10 @@ const Reports = () => {
   const [tab, setTab]                   = useState('all');       // all | inbound | outbound
   const [dateFilter, setDateFilter]     = useState({ start: '', end: '' });
   const [search, setSearch]             = useState('');
+  const [currentPage, setCurrentPage]   = useState(1);
+  const [stockPage, setStockPage]       = useState(1);
+  const PAGE_SIZE = 20;
+  const STOCK_PAGE_SIZE = 15;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -120,6 +156,12 @@ const Reports = () => {
     });
   }, [transactions, tab, dateFilter, search]);
 
+  // Pagination for transactions
+  const totalTxn = filtered.length;
+  const totalTxnPages = Math.max(1, Math.ceil(totalTxn / PAGE_SIZE));
+  const safeTxnPage = Math.min(currentPage, totalTxnPages);
+  const paginatedTxn = filtered.slice((safeTxnPage - 1) * PAGE_SIZE, safeTxnPage * PAGE_SIZE);
+
   const stats = useMemo(() => {
     const inn = transactions.filter(t => ['inbound', 'initial'].includes(t.transaction_type));
     const out = transactions.filter(t => t.transaction_type === 'outbound');
@@ -141,7 +183,19 @@ const Reports = () => {
     };
   }, [transactions, products]);
 
-  const resetFilters = () => { setDateFilter({ start: '', end: '' }); setSearch(''); };
+  const resetFilters = () => { setDateFilter({ start: '', end: '' }); setSearch(''); setCurrentPage(1); };
+
+  // Sort products by qty asc, paginate
+  const sortedProducts = useMemo(() => {
+    return [...products].sort((a, b) => {
+      const qtyA = a.stocks?.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) || 0;
+      const qtyB = b.stocks?.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) || 0;
+      return qtyA - qtyB;
+    });
+  }, [products]);
+  const totalStockPages = Math.max(1, Math.ceil(sortedProducts.length / STOCK_PAGE_SIZE));
+  const safeStockPage = Math.min(stockPage, totalStockPages);
+  const paginatedProducts = sortedProducts.slice((safeStockPage - 1) * STOCK_PAGE_SIZE, safeStockPage * STOCK_PAGE_SIZE);
 
   const exportTxt = (type) => {
     const lines = [];
@@ -239,20 +293,20 @@ const Reports = () => {
           {/* Inventory table */}
           <div style={{ background: 'white', borderRadius: '14px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', marginBottom: '1.5rem', overflow: 'hidden' }}>
             <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: '700', color: '#1a202c' }}>📦 Tồn kho sản phẩm ({products.length})</span>
+              <span style={{ fontWeight: '700', color: '#1a202c' }}>📦 Tồn kho sản phẩm ({products.length}) <span style={{ fontSize: '0.78rem', color: '#a0aec0', fontWeight: '400' }}>— sắp xếp tồn kho tăng dần</span></span>
               <button onClick={() => exportTxt('stock')} style={btnStyle('#ed8936')}>📦 Xuất tồn kho</button>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f7fafc' }}>
-                    {['Mã SP', 'Tên sản phẩm', 'Danh mục', 'Tồn kho', 'Giá vốn', 'Giá bán', 'Giá trị tồn'].map(h => (
+                    {['#', 'Mã SP', 'Tên sản phẩm', 'Danh mục', 'Tồn kho', 'Giá vốn', 'Giá bán', 'Giá trị tồn'].map(h => (
                       <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.78rem', fontWeight: '700', color: '#718096', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {products.map((p, i) => {
+                  {paginatedProducts.map((p, i) => {
                     const qty  = p.stocks?.reduce((a, b) => a + (b.quantity_on_hand || 0), 0) || 0;
                     const cost = p.prices?.[0]?.cost_price || 0;
                     const sell = p.prices?.[0]?.selling_price || 0;
@@ -260,10 +314,11 @@ const Reports = () => {
                     const catLabel = cat ? (cat.parent_id?.name ? `${cat.parent_id.name} (${cat.name})` : cat.name) : '—';
                     return (
                       <tr key={p._id} style={{ borderBottom: '1px solid #f0f0f0', background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#a0aec0' }}>{(safeStockPage - 1) * STOCK_PAGE_SIZE + i + 1}</td>
                         <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#6366f1', fontWeight: '600' }}>{p.product_code}</td>
                         <td style={{ padding: '0.75rem 1rem', fontWeight: '600', color: '#1a202c' }}>{p.product_name}</td>
                         <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#718096' }}>{catLabel}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: '700', color: qty > 0 ? '#16a34a' : '#e53e3e' }}>{qty}</td>
+                        <td style={{ padding: '0.75rem 1rem', fontWeight: '700', color: qty === 0 ? '#e53e3e' : qty <= 5 ? '#d97706' : '#16a34a' }}>{qty}</td>
                         <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#4a5568' }}>{fmtCurrency(cost)}</td>
                         <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#4a5568' }}>{fmtCurrency(sell)}</td>
                         <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', fontWeight: '600', color: '#553c9a' }}>{fmtCurrency(qty * cost)}</td>
@@ -274,6 +329,53 @@ const Reports = () => {
               </table>
               {products.length === 0 && <div style={{ textAlign: 'center', padding: '2rem', color: '#718096' }}>Không có sản phẩm nào</div>}
             </div>
+            {/* Stock Pagination */}
+            {totalStockPages > 1 && (() => {
+              const getPageNums = () => {
+                const nums = new Set([1, totalStockPages]);
+                for (let i = Math.max(2, safeStockPage - 1); i <= Math.min(totalStockPages - 1, safeStockPage + 1); i++) nums.add(i);
+                return [...nums].sort((a, b) => a - b);
+              };
+              const pageNums = getPageNums();
+              const btnBase = { height: '34px', minWidth: '34px', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' };
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.875rem 1.5rem', borderTop: '1px solid #f0f0f0', gap: '0.4rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <button onClick={() => setStockPage(p => Math.max(1, p - 1))} disabled={safeStockPage === 1}
+                      style={{ ...btnBase, padding: '0 0.75rem', opacity: safeStockPage === 1 ? 0.35 : 1, cursor: safeStockPage === 1 ? 'not-allowed' : 'pointer', color: '#111827' }}
+                      onMouseEnter={e => { if (safeStockPage !== 1) e.currentTarget.style.background = '#f0f4ff'; }}
+                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                      Truoc
+                    </button>
+                    {pageNums.map((num, i) => {
+                      const prev = pageNums[i - 1];
+                      const isActive = num === safeStockPage;
+                      return (
+                        <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          {prev && num - prev > 1 && <span style={{ color: '#a0aec0', padding: '0 0.2rem' }}>...</span>}
+                          <button onClick={() => setStockPage(num)}
+                            style={{ ...btnBase, background: isActive ? '#6366f1' : 'white', color: isActive ? 'white' : '#374151', borderColor: isActive ? '#6366f1' : '#e2e8f0' }}
+                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f4ff'; }}
+                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
+                            {num}
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <button onClick={() => setStockPage(p => Math.min(totalStockPages, p + 1))} disabled={safeStockPage === totalStockPages}
+                      style={{ ...btnBase, padding: '0 0.75rem', opacity: safeStockPage === totalStockPages ? 0.35 : 1, cursor: safeStockPage === totalStockPages ? 'not-allowed' : 'pointer', color: '#111827' }}
+                      onMouseEnter={e => { if (safeStockPage !== totalStockPages) e.currentTarget.style.background = '#f0f4ff'; }}
+                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                      Sau
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '0.8rem', color: '#718096' }}>
+                    Trang <b>{safeStockPage}</b>/{totalStockPages} · <b>{products.length}</b> sản phẩm
+                  </span>
+                </div>
+              );
+            })()}
+
           </div>
 
           {/* Transaction section */}
@@ -337,7 +439,7 @@ const Reports = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((t, i) => {
+                  {paginatedTxn.map((t, i) => {
                     const info = TYPE_MAP[t.transaction_type] || TYPE_MAP.adjust;
                     let party = t.supplier_name || t.customer_name || '';
                     if (!party && t.note) {
@@ -378,6 +480,53 @@ const Reports = () => {
                 </div>
               )}
             </div>
+
+            {/* Pagination */}
+            {totalTxnPages > 1 && (() => {
+              const getPageNums = () => {
+                const nums = new Set([1, totalTxnPages]);
+                for (let i = Math.max(2, safeTxnPage - 1); i <= Math.min(totalTxnPages - 1, safeTxnPage + 1); i++) nums.add(i);
+                return [...nums].sort((a, b) => a - b);
+              };
+              const pageNums = getPageNums();
+              const btnBase = { height: '36px', minWidth: '36px', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' };
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid #f0f0f0', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safeTxnPage === 1}
+                      style={{ ...btnBase, padding: '0 0.875rem', opacity: safeTxnPage === 1 ? 0.35 : 1, cursor: safeTxnPage === 1 ? 'not-allowed' : 'pointer', color: '#111827' }}
+                      onMouseEnter={e => { if (safeTxnPage !== 1) e.currentTarget.style.background = '#f0f4ff'; }}
+                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                      ← Trước
+                    </button>
+                    {pageNums.map((num, i) => {
+                      const prev = pageNums[i - 1];
+                      const isActive = num === safeTxnPage;
+                      return (
+                        <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          {prev && num - prev > 1 && <span style={{ color: '#a0aec0', padding: '0 0.2rem' }}>…</span>}
+                          <button onClick={() => setCurrentPage(num)}
+                            style={{ ...btnBase, background: isActive ? '#6366f1' : 'white', color: isActive ? 'white' : '#374151', borderColor: isActive ? '#6366f1' : '#e2e8f0' }}
+                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f4ff'; }}
+                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
+                            {num}
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <button onClick={() => setCurrentPage(p => Math.min(totalTxnPages, p + 1))} disabled={safeTxnPage === totalTxnPages}
+                      style={{ ...btnBase, padding: '0 0.875rem', opacity: safeTxnPage === totalTxnPages ? 0.35 : 1, cursor: safeTxnPage === totalTxnPages ? 'not-allowed' : 'pointer', color: '#111827' }}
+                      onMouseEnter={e => { if (safeTxnPage !== totalTxnPages) e.currentTarget.style.background = '#f0f4ff'; }}
+                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                      Sau →
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '0.82rem', color: '#718096' }}>
+                    Trang <b>{safeTxnPage}</b>/{totalTxnPages} · <b>{totalTxn}</b> giao dịch
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         </>
       )}

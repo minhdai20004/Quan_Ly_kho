@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import Navbar from './components/Navbar';
 import Dashboard from './views/Dashboard';
-import Products from './views/Products';
-import Categories from './views/Categories';
+import Materials from './views/Materials';
+import Warehouses from './views/Warehouses';
+import Partners from './views/Partners';
+import InboundReceipts from './views/InboundReceipts';
+import OutboundIssues from './views/OutboundIssues';
 import Inventory from './views/Inventory';
-import Suppliers from './views/Suppliers';
-import Transactions from './views/Transactions';
-import Users from './views/Users';
 import Reports from './views/Reports';
+import Users from './views/Users';
 import Login from './views/Login';
 import Register from './views/Register';
 import './App.css';
@@ -21,10 +22,14 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const handleLogin = (userData) => {
-    setUser(userData);
-    setIsLoggedIn(true);
-    localStorage.setItem('user', JSON.stringify(userData));
-  };
+  // userData từ Login.jsx có thể là { token, user } hoặc { token, username, role }
+  const token = userData.token;
+  const user  = userData.user || { username: userData.username, role: userData.role };
+
+  setUser({ ...user, token });
+  setIsLoggedIn(true);
+  localStorage.setItem('user', JSON.stringify({ ...user, token }));
+};
 
   const handleLogout = () => {
     setIsLoggedIn(false);
@@ -36,25 +41,27 @@ function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
-      case 'products':
-        return <Products user={user} />;
-      case 'categories':
-        return <Categories />;
+        return <Dashboard user={user} />;
+      case 'materials':
+        return <Materials user={user} />;
+      case 'warehouses':
+        return <Warehouses user={user} />;
+      case 'partners':
+        return <Partners user={user} />;
+      case 'inbound':
+        return <InboundReceipts user={user} />;
+      case 'outbound':
+        return <OutboundIssues user={user} />;
       case 'inventory':
-        return <Inventory />;
-      case 'suppliers':
-        return <Suppliers />;
-      case 'transactions':
-        return <Transactions />;
-      case 'users':
-        return <Users />;
+        return <Inventory user={user} />;
       case 'reports':
-        return <Reports />;
+        return <Reports user={user} />;
+      case 'users':
+        return <Users user={user} />;
       case 'register':
         return <Register onRegister={() => setActiveTab('dashboard')} />;
       default:
-        return <Dashboard />;
+        return <Dashboard user={user} />;
     }
   };
 
@@ -64,7 +71,12 @@ function App() {
 
   return (
     <div className="app">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} user={user} />
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogout={handleLogout}
+        user={user}
+      />
       <main className="main-content">
         {renderContent()}
       </main>

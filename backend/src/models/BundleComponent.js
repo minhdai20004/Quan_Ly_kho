@@ -1,27 +1,34 @@
 const mongoose = require('mongoose');
 
 const bundleComponentSchema = new mongoose.Schema({
-  bundle_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  component_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  
+  bundle_id: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Material', 
+    required: true 
+  },
+  component_id: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Material', 
+    required: true 
+  },
   // Số lượng component trong bundle
-  quantity: { type: Number, required: true, min: 1, default: 1 },
-  
-  // Đơn vị tính của component
-  unit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductUnit' },
-  
-  // Giá (có thể khác với giá bán lẻ normal)
-  bundle_price: { type: Number, min: 0 },
-  
-  // Thứ tự hiển thị
-  sort_order: { type: Number, default: 0 },
-  
+  quantity: { 
+    type: Number, 
+    required: true, 
+    min: 1, 
+    default: 1 
+  },
+  // Giá (có thể khác với giá bán lẻ bình thường khi nằm trong combo)
+  bundle_price: { 
+    type: Number, 
+    min: 0 
+  },
   // Bắt buộc phải có?
-  is_required: { type: Boolean, default: true },
-  
-  // Ghi chú cho component này trong bundle
+  is_required: { 
+    type: Boolean, 
+    default: true 
+  },
   notes: { type: String },
-  
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });

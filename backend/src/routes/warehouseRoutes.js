@@ -1,32 +1,17 @@
-const express = require('express');
-const router = express.Router();
-const {
-  getWarehouses,
-  getWarehouse,
-  createWarehouse,
-  updateWarehouse,
-  deleteWarehouse,
-  getLocations,
-  createLocation,
-  updateLocation,
-  deleteLocation,
-} = require('../controllers/warehouseController');
+const router = require('express').Router();
+const ctrl   = require('../controllers/warehouseController');
+const { protect, adminOnly } = require('../middleware/auth');
 
-router.route('/')
-  .get(getWarehouses)
-  .post(createWarehouse);
+router.get('/',                              protect, ctrl.getAll);
+router.get('/:id',                           protect, ctrl.getById);
+router.post('/',                             protect, adminOnly, ctrl.create);
+router.put('/:id',                           protect, adminOnly, ctrl.update);
+router.delete('/:id',                        protect, adminOnly, ctrl.delete);
 
-router.route('/:id')
-  .get(getWarehouse)
-  .put(updateWarehouse)
-  .delete(deleteWarehouse);
-
-router.route('/:warehouseId/locations')
-  .get(getLocations)
-  .post(createLocation);
-
-router.route('/:warehouseId/locations/:locationId')
-  .put(updateLocation)
-  .delete(deleteLocation);
+// Vị trí trong kho
+router.get('/:id/locations',                 protect, ctrl.getLocations);
+router.post('/:id/locations',                protect, adminOnly, ctrl.createLocation);
+router.put('/:id/locations/:locationId',     protect, adminOnly, ctrl.updateLocation);
+router.delete('/:id/locations/:locationId',  protect, adminOnly, ctrl.deleteLocation);
 
 module.exports = router;

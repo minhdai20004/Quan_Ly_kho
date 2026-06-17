@@ -9,6 +9,15 @@ const inputStyle = {
   outline: 'none', color: '#1a202c', background: 'white',
 };
 
+// Helper lấy stock và giá từ product đúng chuẩn API
+const getProductStock = (p) =>
+  Array.isArray(p.stocks)
+    ? p.stocks.reduce((a, b) => a + (b.quantity_on_hand || 0), 0)
+    : (p.totalStock || 0);
+
+const getProductCost = (p) =>
+  p.prices?.[0]?.cost_price ?? p.cost_price ?? 0;
+
 const Modal = ({ onClose, children, maxWidth = '480px' }) => (
   <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
     onClick={e => e.target === e.currentTarget && onClose()}>
@@ -134,15 +143,17 @@ const ProductsModal = ({ category, products, onClose }) => {
             {prods.length === 0 ? (
               <tr><td colSpan="5" style={{ padding: '2rem', textAlign: 'center', color: '#718096' }}>Không có sản phẩm nào</td></tr>
             ) : prods.map((p, i) => {
-              const qty = p.totalStock || 0;
+              const qty  = getProductStock(p);
+              const cost = getProductCost(p);
+              const sell = p.prices?.[0]?.selling_price ?? p.selling_price ?? 0;
               return (
                 <tr key={p._id || i} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={{ padding: '0.75rem 1rem' }}>
                     <div style={{ fontWeight: '600', fontSize: '0.875rem', color: '#1a202c' }}>{p.product_code}</div>
                     <div style={{ fontSize: '0.8rem', color: '#718096' }}>{p.product_name}</div>
                   </td>
-                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4a5568' }}>{formatCurrency(p.cost_price)}</td>
-                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4a5568' }}>{formatCurrency(p.selling_price)}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4a5568' }}>{formatCurrency(cost)}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4a5568' }}>{formatCurrency(sell)}</td>
                   <td style={{ padding: '0.75rem 1rem', fontWeight: '700', color: qty === 0 ? '#e53e3e' : qty < 10 ? '#d69e2e' : '#38a169' }}>{qty}</td>
                   <td style={{ padding: '0.75rem 1rem' }}>
                     <span style={{ padding: '0.2rem 0.6rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: '600', background: p.status === 'active' ? '#c6f6d5' : '#e2e8f0', color: p.status === 'active' ? '#22543d' : '#4a5568' }}>
@@ -163,15 +174,18 @@ const CategoryNode = ({ cat, children, products, allCategories, depth, onEdit, o
   const [expanded, setExpanded] = useState(false);
   const hasChildren = children.length > 0;
   const isActive = cat.is_active === true || cat.status === 'active';
-const getAllDescendantIds = (catId) => {
-  const children = allCategories.filter(c => (c.parent_id?._id || c.parent_id)?.toString() === catId?.toString());
-  return [catId, ...children.flatMap(c => getAllDescendantIds(c._id?.toString()))];
-};
-const catIds = getAllDescendantIds(cat._id?.toString());
-const catProds = products.filter(p => catIds.includes((p.category_id?._id || p.category_id)?.toString()));
-const prodCount  = catProds.length;
-const totalStock = catProds.reduce((s, p) => s + (p.totalStock || 0), 0);
-const totalValue = catProds.reduce((s, p) => s + (p.totalStock || 0) * (p.cost_price || 0), 0);
+
+  const getAllDescendantIds = (catId) => {
+    const kids = allCategories.filter(c => (c.parent_id?._id || c.parent_id)?.toString() === catId?.toString());
+    return [catId, ...kids.flatMap(c => getAllDescendantIds(c._id?.toString()))];
+  };
+  const catIds = getAllDescendantIds(cat._id?.toString());
+  const catProds = products.filter(p => catIds.includes((p.category_id?._id || p.category_id)?.toString()));
+
+  const prodCount  = catProds.length;
+  const totalStock = catProds.reduce((s, p) => s + getProductStock(p), 0);
+  const totalValue = catProds.reduce((s, p) => s + getProductStock(p) * getProductCost(p), 0);
+
   const indent = depth * 24;
 
   return (
@@ -205,7 +219,7 @@ const totalValue = catProds.reduce((s, p) => s + (p.totalStock || 0) * (p.cost_p
           </button>
         </div>
         <div style={{ flex: 1, fontSize: '0.82rem', fontWeight: '600', color: totalStock > 0 ? '#38a169' : '#a0aec0' }}>{totalStock.toLocaleString()}</div>
-        <div style={{ flex: 1, fontSize: '0.82rem', color: '#4a5568' }}>{formatCurrency(totalValue)}</div>
+        <div style={{ flex: 1, fontSize: '0.82rem', fontWeight: '600', color: totalValue > 0 ? '#553c9a' : '#a0aec0' }}>{formatCurrency(totalValue)}</div>
         <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
           {depth === 0 && (
             <button onClick={() => onAddChild(cat)}
@@ -262,14 +276,14 @@ const Categories = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleEdit = (cat) => { setEditingCat(cat); setAddChildOf(null); setShowForm(true); };
+  const handleEdit     = (cat) => { setEditingCat(cat); setAddChildOf(null); setShowForm(true); };
   const handleAddChild = (cat) => { setEditingCat(null); setAddChildOf(cat); setShowForm(true); };
-  const handleAddRoot = () => { setEditingCat(null); setAddChildOf(null); setShowForm(true); };
+  const handleAddRoot  = ()    => { setEditingCat(null); setAddChildOf(null); setShowForm(true); };
 
   const handleDelete = async (cat) => {
-    const prodCount = products.filter(p => (p.category_id?._id || p.category_id)?.toString() === cat._id?.toString()).length;
+    const prodCount  = products.filter(p => (p.category_id?._id || p.category_id)?.toString() === cat._id?.toString()).length;
     const childCount = categories.filter(c => (c.parent_id?._id || c.parent_id)?.toString() === cat._id?.toString()).length;
-    if (prodCount > 0) return alert(`Không thể xóa! "${cat.name}" đang có ${prodCount} sản phẩm.`);
+    if (prodCount  > 0) return alert(`Không thể xóa! "${cat.name}" đang có ${prodCount} sản phẩm.`);
     if (childCount > 0) return alert(`Không thể xóa! "${cat.name}" đang có ${childCount} danh mục con.`);
     if (!window.confirm(`Xóa danh mục "${cat.name}"?`)) return;
     try { await categoryApi.delete(cat._id); fetchData(); }

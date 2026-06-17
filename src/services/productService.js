@@ -103,8 +103,12 @@ export const inventoryApi = {
 
 // ========== SUPPLIERS ==========
 export const supplierApi = {
-  getAll: () => api.get('/suppliers'),
+  getAll: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return api.get(`/suppliers${query ? '?' + query : ''}`);
+  },
   getById: (id) => api.get(`/suppliers/${id}`),
+  getStats: () => api.get('/suppliers/stats'),
   getProducts: (supplierId) => api.get(`/suppliers/${supplierId}/products`),
   addProduct: (supplierId, data) => api.post(`/suppliers/${supplierId}/products`, data),
   create: (data) => api.post('/suppliers', data),
