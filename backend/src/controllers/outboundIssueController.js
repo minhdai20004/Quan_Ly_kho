@@ -1,47 +1,48 @@
-const OutboundIssue = require('../models/OutboundIssue');
-const MaterialStock  = require('../models/MaterialStock');
-const Material       = require('../models/Material');
-const BundleComponent = require('../models/BundleComponent'); // Import BundleComponent
-const Transaction    = require('../models/Transaction'); // Import Transaction
+const OutboundIssue   = require('../models/OutboundIssue');
+const MaterialStock   = require('../models/MaterialStock');
+const Material        = require('../models/Material');
+const BundleComponent = require('../models/BundleComponent');
+const Transaction     = require('../models/Transaction');
 
-// Tự sinh mã phiếu: PX-YYYYMMDD-001
+// ── Tự sinh mã phiếu: PX-YYYYMMDD-001 ───────────────────────────────────────
 const genIssueCode = async () => {
-  const today = new Date();
+  const today  = new Date();
   const prefix = `PX-${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
-  const count = await OutboundIssue.countDocuments({ issue_code: { $regex: `^${prefix}` } });
+  const count  = await OutboundIssue.countDocuments({ issue_code: { $regex: `^${prefix}` } });
   return `${prefix}-${String(count + 1).padStart(3, '0')}`;
 };
 
-// Helper ghi log giao dịch tồn kho
-const logStockTransaction = async (materialId, warehouseId, type, quantity, quantityBefore, quantityAfter, user, note, partnerId = null, partnerName = null, referenceId = null) => {
-  await Transaction.create({
-    material_id: materialId,
-    warehouse_id: warehouseId,
-    transaction_type: type,
-    quantity: quantity,
-    quantity_before: quantityBefore,
-    quantity_after: quantityAfter,
-    performed_by: user || 'system',
-    note: note,
-    partner_id: partnerId,
-    partner_name: partnerName,
-    reference_id: referenceId,
-  });
+// ── Log giao dịch ─────────────────────────────────────────────────────────────
+const logStockTransaction = async (materialId, warehouseId, type, quantity, quantityBefore, quantityAfter, user, note, partnerId = null, referenceId = null) => {
+  try {
+    await Transaction.create({
+      material_id:      materialId,
+      warehouse_id:     warehouseId,
+      transaction_type: type,
+      quantity,
+      quantity_before:  quantityBefore,
+      quantity_after:   quantityAfter,
+      performed_by:     user || 'system',
+      note,
+      partner_id:       partnerId,
+      reference_id:     referenceId,
+    });
+  } catch (_) {}
 };
 
-// Lấy danh sách phiếu xuất
+// ── GET /api/outbound-issues ──────────────────────────────────────────────────
 exports.getAll = async (req, res) => {
   try {
     const { status, warehouse_id, search, page = 1, limit = 20 } = req.query;
     const filter = {};
-    if (status)       filter.status = status;
+    if (status)       filter.status       = status;
     if (warehouse_id) filter.warehouse_id = warehouse_id;
-    if (search)       filter.issue_code = { $regex: search, $options: 'i' };
+    if (search)       filter.issue_code   = { $regex: search, $options: 'i' };
 
     const total = await OutboundIssue.countDocuments(filter);
     const items = await OutboundIssue.find(filter)
-      .populate('warehouse_id', 'warehouse_code warehouse_name')
-      .populate('customer_id',  'object_code object_name')
+      .populate('warehouse_id', 'warehouse_code warehouse_name name code')
+      .populate('partner_id',   'object_code object_name name phone')
       .sort({ created_at: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit))
@@ -53,14 +54,13 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// Lấy 1 phiếu xuất
+// ── GET /api/outbound-issues/:id ──────────────────────────────────────────────
 exports.getById = async (req, res) => {
   try {
     const item = await OutboundIssue.findById(req.params.id)
-      .populate('warehouse_id', 'warehouse_code warehouse_name')
-      .populate('customer_id',  'object_code object_name phone')
-      .populate('items.material_id', 'material_code material_name unit')
-      .populate('items.location_id', 'location_code location_name')
+      .populate('warehouse_id', 'warehouse_code warehouse_name name code')
+      .populate('partner_id',   'object_code object_name name phone')
+      .populate('items.material_id', 'product_code product_name unit')
       .lean();
     if (!item) return res.status(404).json({ message: 'Không tìm thấy phiếu xuất' });
     res.json({ data: item });
@@ -69,199 +69,200 @@ exports.getById = async (req, res) => {
   }
 };
 
-// Tạo phiếu xuất mới (status = draft)
+// ── POST /api/outbound-issues ─────────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
-    const { warehouse_id, items, issue_date } = req.body;
-    if (!warehouse_id) return res.status(400).json({ message: 'Thiếu kho xuất' });
+    const { warehouse_id, items, issue_date, partner_id, note } = req.body;
+    if (!warehouse_id)  return res.status(400).json({ message: 'Thiếu kho xuất' });
     if (!items?.length) return res.status(400).json({ message: 'Phiếu xuất phải có ít nhất 1 dòng hàng' });
 
-    // Kiểm tra tồn kho trước khi tạo
+    // Kiểm tra tồn kho
     for (const it of items) {
-      const stock = await MaterialStock.findOne({ material_id: it.material_id, warehouse_id });
-      const available = stock?.quantity_available || 0;
+      const stock = await MaterialStock.findOne({ material_id: it.material_id, warehouse_id }).lean();
+      const available = (stock?.quantity_on_hand ?? 0) - (stock?.quantity_reserved ?? 0);
       if ((it.quantity_issued || 0) > available) {
         const mat = await Material.findById(it.material_id).lean();
         return res.status(400).json({
-          message: `Không đủ tồn kho: ${mat?.material_name || it.material_id} (tồn: ${available}, cần xuất: ${it.quantity_issued})`
+          message: `Không đủ tồn kho: "${mat?.product_name || mat?.product_code || it.material_id}" tại kho này (tồn: ${available}, cần: ${it.quantity_issued})`
         });
       }
     }
 
-    // Tính lại total_price
-    let total_amount = 0;
+    let total_cost = 0;
     const processedItems = items.map(it => {
-      const total_price = (it.quantity_issued || 0) * (it.unit_price || 0);
-      total_amount += total_price;
-      return { ...it, total_price };
+      const item_total = (it.quantity_issued || 0) * (it.unit_price || 0);
+      total_cost += item_total;
+      return {
+        material_id: it.material_id,
+        quantity:    it.quantity_issued || 1,
+        unit_cost:   it.unit_price || 0,
+        total_cost:  item_total,
+        note:        it.note || '',
+      };
     });
 
     const issue_code = await genIssueCode();
     const issue = await OutboundIssue.create({
-      ...req.body,
       issue_code,
-      items: processedItems,
-      total_amount,
-      issue_date: issue_date || new Date(),
-      created_by: req.user?.username || 'system',
-      status: 'draft',
+      warehouse_id,
+      partner_id:     partner_id || null,
+      items:          processedItems,
+      total_cost,
+      total_quantity: processedItems.reduce((s, it) => s + it.quantity, 0),
+      issue_date:     issue_date || new Date(),
+      note:           note || '',
+      performed_by:   req.user?._id || null,
+      status:         'draft',
     });
 
     res.status(201).json({ data: issue, message: `Tạo phiếu xuất ${issue_code} thành công` });
   } catch (err) {
+    console.error('[OutboundIssue.create]', err);
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }
 };
 
-// Cập nhật phiếu (chỉ khi còn draft)
+// ── PUT /api/outbound-issues/:id ──────────────────────────────────────────────
 exports.update = async (req, res) => {
   try {
     const issue = await OutboundIssue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Không tìm thấy phiếu' });
-    if (issue.status !== 'draft') return res.status(400).json({ message: 'Chỉ sửa được phiếu đang ở trạng thái draft' });
+    if (issue.status !== 'draft') return res.status(400).json({ message: 'Chỉ sửa được phiếu nháp' });
 
-    let total_amount = 0;
-    const processedItems = (req.body.items || issue.items).map(it => {
-      const total_price = (it.quantity_issued || 0) * (it.unit_price || 0);
-      total_amount += total_price;
-      return { ...it, total_price };
+    const items = req.body.items || issue.items;
+    let total_cost = 0;
+    const processedItems = items.map(it => {
+      const item_total = (it.quantity_issued || it.quantity || 0) * (it.unit_price || it.unit_cost || 0);
+      total_cost += item_total;
+      return {
+        material_id: it.material_id,
+        quantity:    it.quantity_issued || it.quantity || 1,
+        unit_cost:   it.unit_price || it.unit_cost || 0,
+        total_cost:  item_total,
+        note:        it.note || '',
+      };
     });
 
     const updated = await OutboundIssue.findByIdAndUpdate(
       req.params.id,
-      { ...req.body, items: processedItems, total_amount },
+      {
+        ...req.body,
+        items:          processedItems,
+        total_cost,
+        total_quantity: processedItems.reduce((s, it) => s + it.quantity, 0),
+      },
       { new: true }
-    );
+    ).populate('warehouse_id', 'warehouse_code warehouse_name name code')
+     .populate('partner_id', 'object_code object_name name');
+
     res.json({ data: updated, message: 'Cập nhật phiếu thành công' });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }
 };
 
-// Xác nhận phiếu xuất → trừ tồn kho MaterialStock
+// ── PATCH /api/outbound-issues/:id/confirm → trừ tồn kho ─────────────────────
 exports.confirm = async (req, res) => {
   try {
-    const issue = await OutboundIssue.findById(req.params.id);
-    if (!issue) return res.status(404).json({ message: 'Không tìm thấy phiếu' });
-    if (issue.status === 'completed') return res.status(400).json({ message: 'Phiếu đã hoàn thành rồi' });
-    if (issue.status === 'cancelled') return res.status(400).json({ message: 'Phiếu đã bị huỷ' });
+    const issue = await OutboundIssue.findById(req.params.id).lean();
+    if (!issue)                        return res.status(404).json({ message: 'Không tìm thấy phiếu' });
+    if (issue.status === 'confirmed')  return res.status(400).json({ message: 'Phiếu đã xác nhận rồi' });
+    if (issue.status === 'cancelled')  return res.status(400).json({ message: 'Phiếu đã bị huỷ' });
 
     const user = req.user?.username || 'system';
-    const partnerId = issue.partner_id; // Sử dụng partner_id từ phiếu xuất
-    const partnerName = issue.partner_id?.partner_name;
 
-    // Danh sách các điều chỉnh tồn kho cần thực hiện
-    const stockAdjustments = []; // { material_id, quantity_to_deduct }
-
-    // 1. Thu thập tất cả các vật tư/linh kiện cần trừ và số lượng
+    // Thu thập các điều chỉnh cần trừ
+    const adjustments = [];
     for (const it of issue.items) {
       const material = await Material.findById(it.material_id).lean();
-      if (!material) {
-        return res.status(404).json({ message: `Vật tư ${it.material_id} không tồn tại.` });
-      }
+      if (!material) return res.status(404).json({ message: `Không tìm thấy vật tư: ${it.material_id}` });
 
       if (material.is_bundle) {
-        // Nếu là Bundle, lấy các linh kiện cấu thành
-        const bundleComponents = await BundleComponent.find({ bundle_id: material._id }).lean();
-        if (bundleComponents.length === 0) {
-          return res.status(400).json({ message: `Bundle "${material.material_name}" chưa có linh kiện cấu thành.` });
-        }
-
-        for (const bc of bundleComponents) {
-          const componentMaterial = await Material.findById(bc.component_id).lean();
-          if (!componentMaterial) {
-            return res.status(404).json({ message: `Linh kiện ${bc.component_id} của bundle không tồn tại.` });
-          }
-          const quantityToDeduct = it.quantity_issued * bc.quantity;
-          stockAdjustments.push({
+        const components = await BundleComponent.find({ bundle_id: material._id }).lean();
+        if (!components.length) return res.status(400).json({ message: `Bundle "${material.product_name}" chưa có linh kiện` });
+        for (const bc of components) {
+          adjustments.push({
             material_id: bc.component_id,
-            material_name: componentMaterial.material_name,
-            quantity: quantityToDeduct,
-            is_bundle_component: true,
-            bundle_name: material.material_name,
+            quantity:    it.quantity * bc.quantity,
+            note:        `Xuất linh kiện bundle "${material.product_name}" — phiếu ${issue.issue_code}`,
           });
         }
       } else {
-        // Nếu là vật tư thông thường
-        stockAdjustments.push({
+        adjustments.push({
           material_id: it.material_id,
-          material_name: material.material_name,
-          quantity: it.quantity_issued,
-          is_bundle_component: false,
+          quantity:    it.quantity,
+          note:        `Xuất "${material.product_name}" — phiếu ${issue.issue_code}`,
         });
       }
     }
 
-    // 2. Kiểm tra tồn kho tổng hợp cho tất cả các điều chỉnh
-    const aggregatedDeductions = {}; // { material_id: total_deduction_quantity }
-    for (const adj of stockAdjustments) {
-      aggregatedDeductions[adj.material_id.toString()] = (aggregatedDeductions[adj.material_id.toString()] || 0) + adj.quantity;
-    }
+    // Gộp cùng material_id
+    const deductMap = {};
+    adjustments.forEach(a => {
+      const k = a.material_id.toString();
+      deductMap[k] = (deductMap[k] || 0) + a.quantity;
+    });
 
-    for (const matId in aggregatedDeductions) {
-      const requiredQuantity = aggregatedDeductions[matId];
+    // Kiểm tra tồn kho
+    for (const [matId, qty] of Object.entries(deductMap)) {
       const stock = await MaterialStock.findOne({ material_id: matId, warehouse_id: issue.warehouse_id }).lean();
-      const material = await Material.findById(matId).lean();
-
-      if (!stock || stock.quantity_available < requiredQuantity) {
+      const avail = (stock?.quantity_on_hand ?? 0) - (stock?.quantity_reserved ?? 0);
+      if (avail < qty) {
+        const mat = await Material.findById(matId).lean();
         return res.status(400).json({
-          message: `Không đủ tồn kho cho ${material?.material_name || matId} tại kho ${issue.warehouse_id?.warehouse_name || issue.warehouse_id} (tồn: ${stock?.quantity_available || 0}, cần xuất: ${requiredQuantity})`
+          message: `Không đủ tồn kho: "${mat?.product_name || matId}" (tồn: ${avail}, cần: ${qty})`
         });
       }
     }
 
-    // 3. Thực hiện trừ tồn kho và ghi log giao dịch
-    for (const adj of stockAdjustments) {
+    // Trừ tồn kho
+    for (const adj of adjustments) {
       const stock = await MaterialStock.findOne({ material_id: adj.material_id, warehouse_id: issue.warehouse_id });
-      if (stock) {
-        const quantityBefore = stock.quantity_on_hand;
-        stock.quantity_on_hand -= adj.quantity;
-        stock.quantity_available -= adj.quantity;
-        stock.last_outbound_date = new Date();
-
-        // Cập nhật cảnh báo tồn thấp
-        const material = await Material.findById(adj.material_id).lean();
-        if (material) {
-          stock.low_stock_alert = stock.quantity_on_hand < (material.min_stock || 0);
-        }
-        stock.total_cost = stock.quantity_on_hand * stock.unit_cost;
-
-        await stock.save();
-
-        // Ghi log giao dịch
-        const note = adj.is_bundle_component
-          ? `Xuất linh kiện "${adj.material_name}" của Bundle "${adj.bundle_name}" trong phiếu xuất ${issue.issue_code}`
-          : `Xuất vật tư "${adj.material_name}" trong phiếu xuất ${issue.issue_code}`;
-        await logStockTransaction(adj.material_id, issue.warehouse_id, 'outbound', adj.quantity, quantityBefore, stock.quantity_on_hand, user, note, partnerId, partnerName, issue._id);
-      } else {
-        // Trường hợp không tìm thấy stock, mặc dù đã kiểm tra ở bước 2.
-        // Điều này không nên xảy ra nếu bước 2 được thực hiện đúng.
-        console.warn(`Không tìm thấy MaterialStock cho material_id: ${adj.material_id} tại warehouse_id: ${issue.warehouse_id} trong quá trình trừ kho.`);
-      }
+      if (!stock) continue;
+      const before = stock.quantity_on_hand;
+      stock.quantity_on_hand  -= adj.quantity;
+      stock.quantity_available = Math.max(0, stock.quantity_on_hand - (stock.quantity_reserved || 0));
+      stock.out_of_stock       = stock.quantity_on_hand <= 0;
+      stock.last_movement_at   = new Date();
+      await stock.save();
+      await logStockTransaction(adj.material_id, issue.warehouse_id, 'outbound', adj.quantity, before, stock.quantity_on_hand, user, adj.note, issue.partner_id, issue._id);
     }
 
-    // Cập nhật trạng thái phiếu xuất
-    issue.status       = 'completed';
-    issue.confirmed_by = req.user?.username || 'system';
-    await issue.save();
+    await OutboundIssue.findByIdAndUpdate(req.params.id, {
+      status:       'confirmed',
+      confirmed_by: user,
+    });
 
     res.json({ message: `Xác nhận phiếu ${issue.issue_code} thành công — đã trừ tồn kho` });
   } catch (err) {
-    console.error('Lỗi khi xác nhận phiếu xuất:', err);
+    console.error('[OutboundIssue.confirm]', err);
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }
 };
 
-// Huỷ phiếu
+// ── PATCH /api/outbound-issues/:id/cancel ─────────────────────────────────────
 exports.cancel = async (req, res) => {
   try {
     const issue = await OutboundIssue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Không tìm thấy phiếu' });
-    if (issue.status === 'completed') return res.status(400).json({ message: 'Phiếu đã hoàn thành, không thể huỷ' });
-
-    issue.status = 'cancelled';
+    if (issue.status === 'confirmed') return res.status(400).json({ message: 'Phiếu đã xác nhận, không thể huỷ' });
+    issue.status       = 'cancelled';
+    issue.cancelled_by = req.user?.username || 'system';
     await issue.save();
     res.json({ message: 'Huỷ phiếu thành công' });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  }
+};
+
+// ── DELETE /api/outbound-issues/:id (chỉ draft) ───────────────────────────────
+exports.delete = async (req, res) => {
+  try {
+    const issue = await OutboundIssue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Không tìm thấy phiếu' });
+    if (issue.status !== 'draft') return res.status(400).json({ message: 'Chỉ xoá được phiếu nháp' });
+    await issue.deleteOne();
+    res.json({ message: 'Xoá phiếu thành công' });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }

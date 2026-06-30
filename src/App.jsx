@@ -22,14 +22,14 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const handleLogin = (userData) => {
-  // userData từ Login.jsx có thể là { token, user } hoặc { token, username, role }
-  const token = userData.token;
-  const user  = userData.user || { username: userData.username, role: userData.role };
+    // userData từ Login.jsx có thể là { token, user } hoặc { token, username, role }
+    const token = userData.token;
+    const loggedUser  = userData.user || { username: userData.username, role: userData.role };
 
-  setUser({ ...user, token });
-  setIsLoggedIn(true);
-  localStorage.setItem('user', JSON.stringify({ ...user, token }));
-};
+    setUser({ ...loggedUser, token });
+    setIsLoggedIn(true);
+    localStorage.setItem('user', JSON.stringify({ ...loggedUser, token }));
+  };
 
   const handleLogout = () => {
     setIsLoggedIn(false);

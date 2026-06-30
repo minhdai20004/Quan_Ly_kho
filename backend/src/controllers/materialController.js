@@ -2,6 +2,7 @@ const Material      = require('../models/Material');
 const MaterialStock = require('../models/MaterialStock');
 const MaterialBatch = require('../models/MaterialBatch');
 const Transaction   = require('../models/Transaction');
+const Warehouse     = require('../models/Warehouse');
 
 // ─── Helper: log transaction ──────────────────────────────────────────────────
 const logAction = async (materialId, type, user, note, quantity = 0) => {
@@ -20,29 +21,27 @@ const logAction = async (materialId, type, user, note, quantity = 0) => {
 
 // ─── Helper: stock + nearest_expiry per material ──────────────────────────────
 const getStockMap = async (materialIds) => {
-  // Tồn kho từ MaterialStock
-  const stocks = await MaterialStock.find({ product_id: { $in: materialIds } }).lean();
+  // Tồn kho từ MaterialStock — query bằng material_id
+  const stocks = await MaterialStock.find({ material_id: { $in: materialIds } }).lean();
   const stockMap = {};
   stocks.forEach(s => {
-    const key = s.product_id.toString();
+    const key = s.material_id.toString();
     stockMap[key] = (stockMap[key] || 0) + (s.quantity_on_hand || 0);
   });
 
-  // Nearest expiry từ MaterialBatch (lô còn hàng, chưa hết hạn)
+  // Nearest expiry từ MaterialBatch
   const batches = await MaterialBatch.find({
     material_id: { $in: materialIds },
     quantity:    { $gt: 0 },
   }).sort({ expiry_date: 1 }).lean();
 
-  const expiryMap   = {};  // nearest expiry date
-  const expiredMap  = {};  // có lô đã hết hạn không
+  const expiryMap  = {};
+  const expiredMap = {};
   const now = new Date();
 
   batches.forEach(b => {
     const key = b.material_id.toString();
-    // Nearest expiry (đã sort asc nên lấy lần đầu)
     if (!expiryMap[key]) expiryMap[key] = b.expiry_date;
-    // Flag expired
     if (new Date(b.expiry_date) < now) expiredMap[key] = true;
   });
 
@@ -75,12 +74,11 @@ exports.getAll = async (req, res) => {
 
     const result = items.map(m => ({
       ...m,
-      material_name:   m.product_name,
-      material_code:   m.product_code,
-      group_name:      m.category_id?.name || '',
-      totalStock:      stockMap[m._id.toString()] || 0,
-      // HSD gần nhất trong các lô còn hàng
-      nearest_expiry:  expiryMap[m._id.toString()]  || null,
+      material_name:     m.product_name,
+      material_code:     m.product_code,
+      group_name:        m.category_id?.name || '',
+      totalStock:        stockMap[m._id.toString()] || 0,
+      nearest_expiry:    expiryMap[m._id.toString()]  || null,
       has_expired_batch: expiredMap[m._id.toString()] || false,
     }));
 
@@ -102,8 +100,8 @@ exports.getById = async (req, res) => {
     if (!item) return res.status(404).json({ message: 'Không tìm thấy vật tư' });
 
     const [stocks, batches] = await Promise.all([
-      MaterialStock.find({ product_id: item._id })
-        .populate('warehouse_id', 'code name')
+      MaterialStock.find({ material_id: item._id })
+        .populate('warehouse_id', 'code name warehouse_name warehouse_code')
         .lean(),
       MaterialBatch.find({ material_id: item._id, quantity: { $gt: 0 } })
         .populate('warehouse_id', 'code name')
@@ -113,7 +111,7 @@ exports.getById = async (req, res) => {
 
     const totalStock = stocks.reduce((s, x) => s + (x.quantity_on_hand || 0), 0);
     const now = new Date();
-    const nearest_expiry = batches[0]?.expiry_date || null;
+    const nearest_expiry    = batches[0]?.expiry_date || null;
     const has_expired_batch = batches.some(b => new Date(b.expiry_date) < now);
 
     res.json({
@@ -134,7 +132,6 @@ exports.getById = async (req, res) => {
 };
 
 // ─── POST /api/materials ──────────────────────────────────────────────────────
-// ─── POST /api/materials ──────────────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
     const { product_code, product_name } = req.body;
@@ -145,7 +142,6 @@ exports.create = async (req, res) => {
     if (exists)
       return res.status(409).json({ message: `Mã "${product_code}" đã tồn tại` });
 
-    // Sanitize: empty string → undefined để tránh CastError ObjectId
     const body = { ...req.body };
     if (!body.category_id) delete body.category_id;
 
@@ -154,6 +150,34 @@ exports.create = async (req, res) => {
       product_code: product_code.trim(),
       product_name: product_name.trim(),
     });
+
+    // ── Auto-tạo MaterialStock = 0 cho tất cả kho đang active ──────────────
+    try {
+      const warehouses = await Warehouse.find({ status: 'active' }).lean();
+      await Promise.all(warehouses.map(w =>
+        MaterialStock.findOneAndUpdate(
+          { material_id: item._id, warehouse_id: w._id },
+          {
+            $setOnInsert: {
+              material_id:        item._id,
+              warehouse_id:       w._id,
+              quantity_on_hand:   0,
+              quantity_reserved:  0,
+              quantity_available: 0,
+              reorder_point:      0,
+              unit_cost:          0,
+              low_stock_alert:    false,
+              out_of_stock:       true,
+              created_at:         new Date(),
+              updated_at:         new Date(),
+            }
+          },
+          { upsert: true, new: true }
+        )
+      ));
+    } catch (stockErr) {
+      console.warn('[Material.create] Auto-create stock failed:', stockErr.message);
+    }
 
     await logAction(item._id, 'create', req.user?.username, `Tạo mới: ${item.product_name}`);
     res.status(201).json({ data: item, message: 'Tạo vật tư thành công' });

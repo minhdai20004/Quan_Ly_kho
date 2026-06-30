@@ -62,4 +62,57 @@ exports.getMe = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }
+};// ─── Thêm vào cuối authController.js ────────────────────────────────────────
+
+// GET /api/auth/users — danh sách user (admin only)
+exports.getAll = async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort({ created_at: -1 }).lean();
+    res.json({ data: users });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  }
+};
+
+// PUT /api/auth/users/:id — cập nhật user
+exports.updateUser = async (req, res) => {
+  try {
+    const { password, ...rest } = req.body;
+    const update = { ...rest };
+    if (password) update.password = password; // model sẽ hash lại qua pre-save nếu có hook
+
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true }).select('-password');
+    if (!user) return res.status(404).json({ message: 'Không tìm thấy user' });
+    res.json({ data: user, message: 'Cập nhật thành công' });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  }
+};
+
+// PATCH /api/auth/users/:id/toggle — bật/tắt tài khoản
+exports.toggleActive = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Không tìm thấy user' });
+    if (user._id.toString() === req.user.id)
+      return res.status(400).json({ message: 'Không thể khoá tài khoản của chính mình' });
+
+    user.is_active = !user.is_active;
+    await user.save();
+    res.json({ message: `${user.is_active ? 'Đã mở' : 'Đã khoá'} tài khoản ${user.username}`, data: { is_active: user.is_active } });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  }
+};
+
+// DELETE /api/auth/users/:id
+exports.deleteUser = async (req, res) => {
+  try {
+    if (req.params.id === req.user.id)
+      return res.status(400).json({ message: 'Không thể xoá tài khoản của chính mình' });
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Xoá tài khoản thành công' });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  }
 };

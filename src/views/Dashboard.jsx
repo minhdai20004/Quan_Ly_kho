@@ -1,347 +1,442 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// ================================================================
+//  WMS — LUXURY DASHBOARD  v3.2  (fixed field names)
+//  Paste to: src/views/Dashboard.jsx
+// ================================================================
+import { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  Legend, ResponsiveContainer, LineChart, Line, Area, AreaChart
-} from 'recharts';
+  Stack, Package, Handshake, Warning,
+  ArrowSquareIn, ArrowSquareOut, ArrowClockwise,
+  CheckCircle, Clock, XCircle, ChartBar, ChartLine,
+} from '@phosphor-icons/react';
+import api from '../services/api';
 import './Dashboard.css';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+/* ─── Helpers ────────────────────────────────────────────────── */
+const fmt    = (n) => Number(n || 0).toLocaleString('vi-VN');
+const fmtDay = (d) => new Intl.DateTimeFormat('vi-VN', {
+  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+}).format(d);
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-const fmt = (n) => new Intl.NumberFormat('vi-VN').format(n ?? 0);
-const fmtCurrency = (n) =>
-  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(n ?? 0);
-const fmtDate = (d) => {
-  const date = new Date(d);
-  return date.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-};
+// ✅ Helper lấy tên vật tư — handle mọi field name
+const getMaterialName = (item) =>
+  item?.product_name || item?.material_name || item?.name || '—';
 
-// ─── Custom Tooltip for Chart ───────────────────────────────────────────────
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
+// ✅ Helper lấy mã vật tư
+const getMaterialCode = (item) =>
+  item?.product_code || item?.material_code || item?.code || '';
+
+// ✅ Helper lấy tên partner
+const getPartnerName = (p) =>
+  p?.name || p?.object_name || p?.partner_name || '—';
+
+// ✅ Helper lấy tên kho
+const getWarehouseName = (w) =>
+  w?.name || w?.warehouse_name || '—';
+
+/* ─── useCountUp ─────────────────────────────────────────────── */
+function useCountUp(target, active) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    if (!active) { setVal(0); return; }
+    const n = Number(target) || 0;
+    if (n === 0) { setVal(0); return; }
+    let raf, start = null;
+    const run = (ts) => {
+      if (!start) start = ts;
+      const p = Math.min((ts - start) / 1100, 1);
+      const e = 1 - Math.pow(1 - p, 3);
+      setVal(Math.round(e * n));
+      if (p < 1) raf = requestAnimationFrame(run);
+    };
+    raf = requestAnimationFrame(run);
+    return () => cancelAnimationFrame(raf);
+  }, [target, active]);
+  return val;
+}
+
+/* ─── KPI Card ───────────────────────────────────────────────── */
+function KPICard({ icon: Icon, iconColor, iconBg, label, value, sub, accentClass, delay, loaded }) {
+  const count = useCountUp(value, loaded);
   return (
-    <div className="db-tooltip">
-      <p className="db-tooltip__label">{label}</p>
-      {payload.map((p) => (
-        <p key={p.dataKey} style={{ color: p.color }}>
-          {p.name}: <strong>{fmt(p.value)}</strong>
-        </p>
-      ))}
+    <div className={`kpi-card ${accentClass}`} style={{ animationDelay: `${delay}ms` }}>
+      <div className="kpi-bg-orb"/>
+      <div className="kpi-icon-box">
+        <Icon size={22} weight="duotone" color={iconColor}/>
+      </div>
+      {!loaded ? (
+        <><div className="kpi-skel-value"/><div className="kpi-skel-label"/><div className="kpi-skel-sub"/></>
+      ) : (
+        <>
+          <div className="kpi-value">{count.toLocaleString('vi-VN')}</div>
+          <div className="kpi-label">{label}</div>
+          <div className="kpi-sub-row">{sub}</div>
+        </>
+      )}
     </div>
   );
+}
+
+/* ─── SVG Area Chart ─────────────────────────────────────────── */
+function AreaChart({ data }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="dash-empty" style={{ minHeight: 160 }}>
+        <div className="dash-empty-icon"><ChartLine size={24}/></div>
+        <span className="dash-empty-text">Chưa có dữ liệu trong khoảng này</span>
+      </div>
+    );
+  }
+  const W = 520, H = 170, PX = 8, PY = 10;
+  const maxVal = Math.max(...data.flatMap(d => [d.nhap || 0, d.xuat || 0]), 1);
+  const xi = (i) => PX + (i / (Math.max(data.length - 1, 1))) * (W - PX * 2);
+  const yn = (v) => H - PY - ((v || 0) / maxVal) * (H - PY * 2);
+  const pathN = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xi(i).toFixed(1)},${yn(d.nhap).toFixed(1)}`).join(' ');
+  const pathX = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xi(i).toFixed(1)},${yn(d.xuat).toFixed(1)}`).join(' ');
+  const floor = `L${xi(data.length-1)},${H-PY} L${xi(0)},${H-PY} Z`;
+  const grids = [0.25, 0.5, 0.75].map(t => H - PY - t * (H - PY * 2));
+
+  return (
+    <div className="chart-svg-area">
+      <svg className="chart-svg" viewBox={`0 0 ${W} ${H + 16}`}>
+        <defs>
+          <linearGradient id="gN" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%"   stopColor="#be185d" stopOpacity="0.20"/>
+            <stop offset="100%" stopColor="#be185d" stopOpacity="0.01"/>
+          </linearGradient>
+          <linearGradient id="gX" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%"   stopColor="#0284c7" stopOpacity="0.16"/>
+            <stop offset="100%" stopColor="#0284c7" stopOpacity="0.01"/>
+          </linearGradient>
+        </defs>
+        {grids.map((y, i) => (
+          <line key={i} x1={PX} x2={W-PX} y1={y} y2={y} stroke="#f1f5f9" strokeWidth="1"/>
+        ))}
+        <line x1={PX} x2={W-PX} y1={H-PY} y2={H-PY} stroke="#e2e8f0" strokeWidth="1"/>
+        <path d={`${pathN} ${floor}`} fill="url(#gN)"/>
+        <path d={`${pathX} ${floor}`} fill="url(#gX)"/>
+        <path d={pathN} className="chart-line-nhap"/>
+        <path d={pathX} className="chart-line-xuat"/>
+        {data.map((d, i) => (
+          <g key={i}>
+            <circle cx={xi(i)} cy={yn(d.nhap)} r="3.5" fill="white" stroke="#be185d" strokeWidth="2"/>
+            <circle cx={xi(i)} cy={yn(d.xuat)} r="3.5" fill="white" stroke="#0284c7" strokeWidth="2"/>
+          </g>
+        ))}
+        {data.map((d, i) => (
+          (data.length <= 8 || i % Math.ceil(data.length / 7) === 0 || i === data.length - 1) && (
+            <text key={i} x={xi(i)} y={H + 13} textAnchor="middle"
+              fill="#94a3b8" fontSize="9" fontFamily="Outfit,sans-serif">{d.date}</text>
+          )
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+/* ─── Top Stock Row ──────────────────────────────────────────── */
+const RANK_STYLES = [
+  { bg: '#fef3c7', color: '#d97706' },
+  { bg: '#f1f5f9', color: '#64748b' },
+  { bg: '#fff7ed', color: '#c2410c' },
+];
+const BAR_GRADIENTS = [
+  'linear-gradient(90deg,#be185d,#f472b6)',
+  'linear-gradient(90deg,#0284c7,#38bdf8)',
+  'linear-gradient(90deg,#059669,#34d399)',
+  'linear-gradient(90deg,#d97706,#fbbf24)',
+  'linear-gradient(90deg,#7c3aed,#a78bfa)',
+];
+
+function TopRow({ item, maxQty, index }) {
+  const pct  = maxQty > 0 ? (item.totalQuantity / maxQty) * 100 : 0;
+  const rs   = RANK_STYLES[index] || { bg: '#f8fafc', color: '#94a3b8' };
+  // ✅ Fixed: use helper to get name
+  const name = getMaterialName(item);
+  const code = getMaterialCode(item);
+  return (
+    <div className="stock-bar-row" style={{ animationDelay: `${index * 70}ms` }}>
+      <div className="stock-bar-label-row">
+        <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
+          <span style={{ width:22, height:22, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:800, background:rs.bg, color:rs.color, flexShrink:0 }}>
+            {index + 1}
+          </span>
+          <div style={{ minWidth:0 }}>
+            <span className="stock-bar-name" title={name}>{name}</span>
+            {code && <div style={{ fontSize:10, color:'#be185d', fontFamily:'JetBrains Mono,monospace' }}>{code}</div>}
+          </div>
+        </div>
+        <span className="stock-bar-qty">{fmt(item.totalQuantity)}</span>
+      </div>
+      <div className="stock-bar-track">
+        <div className="stock-bar-fill" style={{ background:BAR_GRADIENTS[index % BAR_GRADIENTS.length], '--bar-w':`${pct}%`, width:`${pct}%`, animationDelay:`${index * 70 + 200}ms` }}/>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Low Stock Row ──────────────────────────────────────────── */
+function LowRow({ item, maxQty, index }) {
+  const qty    = item.quantity || item.quantity_on_hand || 0;
+  const pct    = maxQty > 0 ? Math.min((qty / maxQty) * 100, 100) : 0;
+  const isCrit = qty === 0;
+  // ✅ Fixed: use helper to get name & code
+  const name   = getMaterialName(item);
+  const code   = getMaterialCode(item);
+  return (
+    <div className={`alert-row ${isCrit ? 'crit' : 'warn'}`} style={{ animationDelay:`${index * 65}ms` }}>
+      <div className="alert-icon-circle">
+        {isCrit
+          ? <XCircle size={15} weight="duotone"/>
+          : <Warning size={15} weight="duotone"/>
+        }
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+          <span className="alert-item-name" title={name}>
+            {name}
+            {code && (
+              <span style={{ marginLeft:6, fontSize:10, fontFamily:'JetBrains Mono,monospace', color:'#be185d', background:'#fdf2f8', padding:'1px 5px', borderRadius:4 }}>
+                {code}
+              </span>
+            )}
+          </span>
+          <span className="alert-item-qty">{fmt(qty)}</span>
+        </div>
+        <div style={{ height:4, background:'#f1f5f9', borderRadius:4, overflow:'hidden' }}>
+          <div style={{ height:'100%', width:`${pct}%`, borderRadius:4, background:isCrit?'#ef4444':'#f59e0b', transition:'width .7s cubic-bezier(.16,1,.3,1)' }}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Transaction Row ────────────────────────────────────────── */
+// ✅ Fixed: added 'confirmed' status (không chỉ 'completed')
+const STATUS_MAP = {
+  confirmed: { label: 'Đã xác nhận', cls: 'ok',  Icon: CheckCircle },
+  completed: { label: 'Hoàn thành',  cls: 'ok',  Icon: CheckCircle },
+  draft:     { label: 'Nháp',        cls: 'pen', Icon: Clock       },
+  cancelled: { label: 'Đã huỷ',      cls: 'no',  Icon: XCircle     },
 };
 
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-const StatCard = ({ title, value, sub, icon, accent, loading }) => (
-  <div className="db-stat-card" style={{ '--accent': accent }}>
-    <div className="db-stat-card__icon">{icon}</div>
-    <div className="db-stat-card__body">
-      <span className="db-stat-card__title">{title}</span>
-      {loading ? (
-        <div className="db-skeleton db-skeleton--lg" />
-      ) : (
-        <h2 className="db-stat-card__value">{fmt(value)}</h2>
-      )}
-      {sub && <span className="db-stat-card__sub">{sub}</span>}
+function TxRow({ tx, index }) {
+  const isIn = tx.transaction_type === 'inbound' || !!tx.receipt_code;
+  const code = tx.receipt_code || tx.issue_code || '—';
+  // ✅ Fixed: partner name field
+  const partner = getPartnerName(tx.partner_id);
+  // ✅ Fixed: warehouse name field
+  const wh    = getWarehouseName(tx.warehouse_id);
+  const date  = tx.created_at ? new Date(tx.created_at).toLocaleDateString('vi-VN') : '—';
+  const s     = STATUS_MAP[tx.status] || STATUS_MAP.draft;
+  return (
+    <div className="tx-row" style={{ animationDelay:`${index * 50}ms` }}>
+      <div style={{ width:34, height:34, borderRadius:10, background:isIn?'#dcfce7':'#fdf2f8', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        {isIn
+          ? <ArrowSquareIn  size={16} color="#16a34a" weight="fill"/>
+          : <ArrowSquareOut size={16} color="#be185d" weight="fill"/>
+        }
+      </div>
+      <div className="tx-meta">
+        <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:2 }}>
+          <span className="tx-code-text" style={{ color:isIn?'#16a34a':'#be185d' }}>{code}</span>
+          <span className={`tx-badge ${s.cls}`} style={{ display:'inline-flex', alignItems:'center', gap:3 }}>
+            <s.Icon size={11} weight="fill"/> {s.label}
+          </span>
+        </div>
+        <span className="tx-partner-text">{partner} · {wh}</span>
+      </div>
+      <span style={{ fontSize:11.5, color:'#cbd5e1', whiteSpace:'nowrap', flexShrink:0 }}>{date}</span>
     </div>
-    <div className="db-stat-card__bg-icon">{icon}</div>
-  </div>
+  );
+}
+
+/* ─── Shimmer ────────────────────────────────────────────────── */
+const Skel = ({ h=14, w='100%', r=7, mb=10 }) => (
+  <div style={{ height:h, width:w, borderRadius:r, marginBottom:mb, background:'linear-gradient(90deg,#f1f5f9 25%,#e8edf3 50%,#f1f5f9 75%)', backgroundSize:'200% 100%', animation:'shimmerSwipe 1.5s ease-in-out infinite' }}/>
 );
 
-// ─── Low Stock Row ────────────────────────────────────────────────────────────
-const LowStockRow = ({ item }) => {
-  const pct = Math.min(100, Math.round((item.quantity / (item.threshold || 10)) * 100));
-  const urgent = pct <= 20;
-  return (
-    <div className="db-low-row">
-      <div className="db-low-row__info">
-        <span className="db-low-row__name">{item.name}</span>
-        <span className="db-low-row__code">{item.product_code}</span>
-      </div>
-      <div className="db-low-row__right">
-        <div className="db-low-row__bar-wrap">
-          <div
-            className="db-low-row__bar"
-            style={{ width: `${pct}%`, background: urgent ? '#ef4444' : '#f97316' }}
-          />
-        </div>
-        <span className={`db-low-row__qty ${urgent ? 'db-low-row__qty--urgent' : ''}`}>
-          {fmt(item.quantity)}
-          <span className="db-low-row__unit"> {item.unit || 'cái'}</span>
-        </span>
-      </div>
-    </div>
-  );
-};
-
-// ─── Transaction Badge ───────────────────────────────────────────────────────
-const TxBadge = ({ type }) => {
-  const isIn = type === 'inbound' || type === 'initial';
-  return (
-    <span className={`db-badge ${isIn ? 'db-badge--in' : 'db-badge--out'}`}>
-      {isIn ? '↑ Nhập' : '↓ Xuất'}
-    </span>
-  );
-};
-
-// ─── Main Component ───────────────────────────────────────────────────────────
+/* ─── Main Dashboard ─────────────────────────────────────────── */
 export default function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [lowStock, setLowStock] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [chartData, setChartData] = useState([]);
-  const [topProducts, setTopProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [chartRange, setChartRange] = useState(7); // 7 or 30 days
+  const [stats,    setStats]    = useState(null);
+  const [chart,    setChart]    = useState([]);
+  const [low,      setLow]      = useState([]);
+  const [top,      setTop]      = useState([]);
+  const [recent,   setRecent]   = useState([]);
+  const [days,     setDays]     = useState(7);
+  const [loading,  setLoading]  = useState(true);
+  const [spinning, setSpinning] = useState(false);
 
-  const token = localStorage.getItem('token');
-  const chartRangeFromStorage = localStorage.getItem('chartRange');
-  if (chartRangeFromStorage) {
-    setChartRange(parseInt(chartRangeFromStorage));
-  }
+  // ✅ Unwrap helper — handle { data: { data: [...] } }, { data: [...] }, [...]
+  const unwrap = (v) => v?.data?.data ?? v?.data ?? v ?? null;
 
-  const fetchAll = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [statsRes, lowRes, txRes, chartRes, topRes] = await Promise.all([
-        fetch(`${API}/api/dashboard/stats`, { headers }),
-        fetch(`${API}/api/dashboard/low-stock`, { headers }),
-        fetch(`${API}/api/dashboard/recent-transactions`, { headers }),
-        fetch(`${API}/api/dashboard/chart?days=${chartRange}`, { headers }),
-        fetch(`${API}/api/dashboard/top-products`, { headers }),
-      ]);
+    const results = await Promise.allSettled([
+      api.get('/dashboard/stats'),
+      api.get(`/dashboard/chart?days=${days}`),
+      api.get('/dashboard/low-stock'),
+      api.get('/dashboard/top-products'),
+      api.get('/dashboard/recent-transactions'),
+    ]);
+    if (results[0].status==='fulfilled') setStats(unwrap(results[0].value));
+    if (results[1].status==='fulfilled') { const d=unwrap(results[1].value); setChart(Array.isArray(d)?d:[]); }
+    if (results[2].status==='fulfilled') { const d=unwrap(results[2].value); setLow(Array.isArray(d)?d:[]); }
+    if (results[3].status==='fulfilled') { const d=unwrap(results[3].value); setTop(Array.isArray(d)?d:[]); }
+    if (results[4].status==='fulfilled') { const d=unwrap(results[4].value); setRecent(Array.isArray(d)?d:[]); }
+    setLoading(false);
+    setSpinning(false);
+  }, [days]);
 
-      const [s, l, t, c, tp] = await Promise.all([
-        statsRes.json(), lowRes.json(), txRes.json(), chartRes.json(), topRes.json(),
-      ]);
+  useEffect(() => { load(); }, [load]);
 
-     setStats(s.data ?? s);
-setLowStock(Array.isArray(l.data) ? l.data : Array.isArray(l) ? l : []);
-setTransactions(Array.isArray(t.data) ? t.data : Array.isArray(t) ? t : []);
-setChartData(Array.isArray(c.data) ? c.data : Array.isArray(c) ? c : []);
-setTopProducts(Array.isArray(tp.data) ? tp.data : Array.isArray(tp) ? tp : []);
-    } catch (err) {
-      console.error('Dashboard fetch error:', err);
-      setError('Không thể tải dữ liệu dashboard. Kiểm tra server đang chạy chưa bro.');
-    } finally {
-      setLoading(false);
-    }
-  }, [token, chartRange]);
+  const handleRefresh = () => { setSpinning(true); load(); };
 
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  const loaded = !loading;
+  const maxLow = Math.max(...low.map(i => i.quantity || i.quantity_on_hand || 0), 1);
+  const maxTop = Math.max(...top.map(i => i.totalQuantity || 0), 1);
+  const now    = new Date();
+  const greet  = now.getHours() < 12 ? 'Chào buổi sáng' : now.getHours() < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
 
-  const statCards = [
-    {
-      title: 'Tổng sản phẩm',
-      value: stats?.totalProducts,
-      sub: stats?.newProductsToday ? `+${stats.newProductsToday} hôm nay` : null,
-      icon: '📦',
-      accent: '#7c3aed',
-    },
-    {
-      title: 'Tổng tồn kho',
-      value: stats?.totalStock,
-      sub: stats?.lowStockCount ? `⚠️ ${stats.lowStockCount} sp sắp hết` : 'Ổn định',
-      icon: '🏭',
-      accent: '#0ea5e9',
-    },
-    {
-      title: 'Danh mục',
-      value: stats?.totalCategories,
-      sub: null,
-      icon: '🗂️',
-      accent: '#10b981',
-    },
-    {
-      title: 'Nhà cung cấp',
-      value: stats?.totalSuppliers,
-      sub: null,
-      icon: '🤝',
-      accent: '#f59e0b',
-    },
+  const kpis = [
+    { icon:Stack,     iconColor:'#be185d', accentClass:'pink',   label:'Tổng tồn kho',  value:stats?.totalStock     ?? 0, sub:<span style={{color:'#94a3b8'}}>{fmt(stats?.totalMaterials)} vật tư · {fmt(stats?.totalGroups)} nhóm</span>,    delay:0   },
+    { icon:Package,   iconColor:'#0284c7', accentClass:'sky',    label:'Vật tư',         value:stats?.totalMaterials ?? 0, sub:<span style={{color:'#0284c7',fontWeight:600}}>+{stats?.newMaterialsToday||0} hôm nay</span>,                    delay:75  },
+    { icon:Handshake, iconColor:'#8b5cf6', accentClass:'violet', label:'Đối tác',         value:stats?.totalPartners  ?? 0, sub:<span style={{color:'#94a3b8'}}>NCC + khách hàng</span>,                                                         delay:150 },
+    { icon:Warning,   iconColor:'#d97706', accentClass:'amber',  label:'Sắp hết hàng',   value:stats?.lowStockCount  ?? 0, sub:<span style={{color:'#d97706',fontWeight:600}}>{(stats?.lowStockCount??0)>0?'Cần bổ sung sớm':'Ổn định'}</span>, delay:225 },
   ];
 
   return (
-    <div className="db-root">
-      {/* ── Header ── */}
-      <div className="db-header">
+    <div className="wms-dashboard">
+
+      {/* ══ HEADER ══════════════════════════════════════════════ */}
+      <div className="dash-header">
         <div>
-          <h1 className="db-header__title">Dashboard</h1>
-          <p className="db-header__sub">
-            {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-          </p>
+          <h1 className="dash-greeting">
+            {greet},&nbsp;<span className="dash-greeting-accent">Admin</span>
+          </h1>
+          <div className="dash-meta-row">
+            <span className="dash-date-text">{fmtDay(now)}</span>
+            <div className="dash-live-badge">
+              <div className="dash-live-dot"/>
+              LIVE
+            </div>
+          </div>
         </div>
-        <button className="db-refresh-btn" onClick={fetchAll} title="Làm mới">
-          🔄 Làm mới
-        </button>
+        <div className="dash-header-right">
+          <div className="dash-period-group">
+            {[[7,'7N'],[14,'14N'],[30,'30N']].map(([v,lbl]) => (
+              <button key={v} className={`dash-period-btn${days===v?' active':''}`} onClick={()=>setDays(v)}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <button className={`dash-icon-btn${spinning?' spinning':''}`} onClick={handleRefresh} title="Làm mới">
+            <ArrowClockwise size={16} weight="bold"/>
+          </button>
+        </div>
       </div>
 
-      {error && (
-        <div className="db-error">
-          <span>⚠️ {error}</span>
-        </div>
-      )}
-
-      {/* ── Stat Cards ── */}
-      <div className="db-stats-grid">
-        {statCards.map((card) => (
-          <StatCard key={card.title} {...card} loading={loading} />
-        ))}
+      {/* ══ KPI GRID ════════════════════════════════════════════ */}
+      <div className="dash-kpi-grid">
+        {kpis.map(k => <KPICard key={k.label} {...k} loaded={loaded}/>)}
       </div>
 
-      {/* ── Row 2: Chart + Low Stock ── */}
-      <div className="db-row2">
-        {/* Chart */}
-        <div className="db-card db-chart-card">
-          <div className="db-card__header">
-            <h3 className="db-card__title">📊 Nhập / Xuất kho</h3>
-            <div className="db-range-tabs">
-              {[7, 30].map((d) => (
-                <button
-                  key={d}
-                  className={`db-range-tab ${chartRange === d ? 'db-range-tab--active' : ''}`}
-                  onClick={() => setChartRange(d)}
-                >
-                  {d} ngày
-                </button>
+      {/* ══ ROW 2 — Chart + Low Stock ═══════════════════════════ */}
+      <div className="dash-charts-row" style={{ marginBottom:18 }}>
+        <div className="panel-card" style={{ animationDelay:'80ms' }}>
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">Biến động nhập / xuất</div>
+              <div className="panel-sub">{days} ngày gần nhất</div>
+            </div>
+            <div className="panel-legend">
+              {[{c:'#be185d',l:'Nhập'},{c:'#0284c7',l:'Xuất'}].map(x => (
+                <div key={x.l} className="legend-dot-item">
+                  <div className="legend-dot-box" style={{ background:x.c }}/>
+                  {x.l}
+                </div>
               ))}
             </div>
           </div>
-          {loading ? (
-            <div className="db-skeleton db-skeleton--chart" />
-          ) : chartData.length === 0 ? (
-            <div className="db-empty">Chưa có giao dịch nào</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }} barCategoryGap="30%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#888' }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#888' }} tickLine={false} axisLine={false} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 13 }} />
-                <Bar dataKey="nhap" name="Nhập kho" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="xuat" name="Xuất kho" fill="#f97316" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+          {loading
+            ? <div style={{ padding:'12px 24px 20px' }}><Skel h={160} r={12} mb={0}/></div>
+            : <AreaChart data={chart}/>
+          }
         </div>
 
-        {/* Low Stock */}
-        <div className="db-card db-lowstock-card">
-          <div className="db-card__header">
-            <h3 className="db-card__title">
-              ⚠️ Sắp hết hàng
-              {lowStock.length > 0 && (
-                <span className="db-badge-count">{lowStock.length}</span>
-              )}
-            </h3>
-          </div>
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="db-skeleton db-skeleton--row" style={{ marginBottom: 12 }} />
-            ))
-          ) : lowStock.length === 0 ? (
-            <div className="db-empty db-empty--green">✅ Tất cả đang ổn định</div>
-          ) : (
-            <div className="db-low-list">
-              {lowStock.map((item) => (
-                <LowStockRow key={item._id} item={item} />
-              ))}
+        <div className="panel-card" style={{ animationDelay:'130ms' }}>
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">Sắp hết hàng</div>
+              <div className="panel-sub">Cần bổ sung sớm</div>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Row 3: Recent Transactions + Top Products ── */}
-      <div className="db-row3">
-        {/* Recent Transactions */}
-        <div className="db-card db-tx-card">
-          <div className="db-card__header">
-            <h3 className="db-card__title">🕐 Giao dịch gần đây</h3>
-            <span className="db-card__sub-label">10 giao dịch cuối</span>
+            {loaded && low.length > 0 && (
+              <div className="panel-badge" style={{ background:'rgba(251,191,36,.14)', border:'1px solid rgba(251,191,36,.3)', color:'#d97706' }}>
+                {low.length} mặt hàng
+              </div>
+            )}
           </div>
-          {loading ? (
-            <div className="db-skeleton db-skeleton--table" />
-          ) : transactions.length === 0 ? (
-            <div className="db-empty">Chưa có giao dịch</div>
-          ) : (
-            <div className="db-tx-table-wrap">
-              <table className="db-tx-table">
-                <thead>
-                  <tr>
-                    <th>Thời gian</th>
-                    <th>Loại</th>
-                    <th>Sản phẩm</th>
-                    <th>SL</th>
-                    <th>Người tạo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((tx) => (
-                    <tr key={tx._id}>
-                      <td className="db-tx-time">{fmtDate(tx.created_at)}</td>
-                      <td><TxBadge type={tx.transaction_type} /></td>
-                      <td className="db-tx-product">
-                        {tx.product_id?.name || tx.productName || '—'}
-                        {tx.product_id?.product_code && (
-                          <span className="db-tx-code"> #{tx.product_id.product_code}</span>
-                        )}
-                      </td>
-                      <td className="db-tx-qty">
-                        <strong>{fmt(tx.quantity)}</strong>
-                        {tx.unit && <span className="db-tx-unit"> {tx.unit}</span>}
-                      </td>
-                      <td className="db-tx-user">{tx.performed_by || 'system'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Top Products */}
-        <div className="db-card db-top-card">
-          <div className="db-card__header">
-            <h3 className="db-card__title">🏆 Top sản phẩm</h3>
-            <span className="db-card__sub-label">Theo tồn kho</span>
-          </div>
-          {loading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="db-skeleton db-skeleton--row" style={{ marginBottom: 10 }} />
-            ))
-          ) : topProducts.length === 0 ? (
-            <div className="db-empty">Chưa có dữ liệu</div>
-          ) : (
-            <div className="db-top-list">
-              {topProducts.map((p, idx) => {
-                const maxQty = topProducts[0]?.totalQuantity || 1;
-                const pct = Math.round((p.totalQuantity / maxQty) * 100);
-                return (
-                  <div key={p._id} className="db-top-row">
-                    <span className={`db-top-rank db-top-rank--${idx + 1}`}>{idx + 1}</span>
-                    <div className="db-top-info">
-                      <span className="db-top-name">{p.name}</span>
-                      <div className="db-top-bar-wrap">
-                        <div
-                          className="db-top-bar"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                    <span className="db-top-qty">{fmt(p.totalQuantity)}</span>
+          <div className="alert-items-list">
+            {loading
+              ? [...Array(5)].map((_,i) => <Skel key={i} h={46} r={10} mb={9}/>)
+              : low.length === 0
+                ? <div className="stock-ok-state">
+                    <div className="stock-ok-icon"><CheckCircle size={28} weight="duotone" color="#059669"/></div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'#059669' }}>Tồn kho ổn định</div>
+                    <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>Không có mặt hàng sắp hết</div>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                : low.map((it,i) => <LowRow key={it._id||i} item={it} maxQty={maxLow} index={i}/>)
+            }
+          </div>
         </div>
       </div>
+
+      {/* ══ ROW 3 — Top Stock + Recent Tx ═══════════════════════ */}
+      <div className="dash-bottom-row">
+        <div className="panel-card" style={{ animationDelay:'160ms' }}>
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">Vật tư tồn nhiều nhất</div>
+              <div className="panel-sub">Top 5 theo số lượng</div>
+            </div>
+          </div>
+          <div className="stock-bars-list">
+            {loading
+              ? [...Array(5)].map((_,i) => <Skel key={i} h={38} r={8} mb={14}/>)
+              : top.length === 0
+                ? <div className="dash-empty"><div className="dash-empty-icon"><ChartBar size={22}/></div><span className="dash-empty-text">Chưa có dữ liệu</span></div>
+                : top.slice(0,5).map((it,i) => <TopRow key={it._id||i} item={it} maxQty={maxTop} index={i}/>)
+            }
+          </div>
+        </div>
+
+        <div className="panel-card" style={{ animationDelay:'200ms' }}>
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">Giao dịch gần đây</div>
+              <div className="panel-sub">Nhập + xuất kho</div>
+            </div>
+            {loaded && (
+              <div style={{ display:'flex', gap:10 }}>
+                <span style={{ display:'flex', alignItems:'center', gap:3, fontSize:11.5, color:'#16a34a', fontWeight:600 }}>
+                  <ArrowSquareIn size={12} weight="fill"/> Nhập
+                </span>
+                <span style={{ display:'flex', alignItems:'center', gap:3, fontSize:11.5, color:'#be185d', fontWeight:600 }}>
+                  <ArrowSquareOut size={12} weight="fill"/> Xuất
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="tx-list-inner" style={{ maxHeight:360, overflowY:'auto', paddingRight:4 }}>
+            {loading
+              ? [...Array(6)].map((_,i) => <Skel key={i} h={50} r={10} mb={10}/>)
+              : recent.length === 0
+                ? <div className="dash-empty"><div className="dash-empty-icon"><ChartBar size={22}/></div><span className="dash-empty-text">Chưa có giao dịch nào</span></div>
+                : recent.map((tx,i) => <TxRow key={i} tx={tx} index={i}/>)
+            }
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

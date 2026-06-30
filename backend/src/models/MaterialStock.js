@@ -1,52 +1,59 @@
 const mongoose = require('mongoose');
 
-const inventoryStockSchema = new mongoose.Schema({
-  stock_id: { type: String, unique: true, required: true },
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  variant_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductVariant' },
-  unit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductUnit' },
+const materialStockSchema = new mongoose.Schema({
+  material_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Material',
+    required: true,
+  },
+  warehouse_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Warehouse',
+    required: true,
+  },
 
-  warehouse_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', required: true },
-  location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Location' },
+  quantity_on_hand:    { type: Number, default: 0, min: 0 },
+  quantity_reserved:   { type: Number, default: 0, min: 0 },
+  quantity_available:  { type: Number, default: 0 },
+  quantity_in_transit: { type: Number, default: 0, min: 0 },
 
-  quantity_on_hand: { type: Number, required: true, min: 0, default: 0 },
-  quantity_reserved: { type: Number, required: true, min: 0, default: 0 },
-  quantity_available: { type: Number, min: 0, default: 0 },
-  quantity_in_transit: { type: Number, min: 0, default: 0 },
-  quantity_on_order: { type: Number, min: 0, default: 0 },
+  reorder_point: { type: Number, default: 0, min: 0 },
+  min_stock:     { type: Number, default: 0, min: 0 },
+  max_stock:     { type: Number, default: null },
 
-  reorder_point: { type: Number, min: 0 },
-  min_stock: { type: Number, min: 0 },
-  max_stock: { type: Number, min: 0 },
+  unit_cost:  { type: Number, default: 0 },
+  total_value: { type: Number, default: 0 },
 
-  unit_cost: { type: Number },
-  total_cost: { type: Number },
+  low_stock_alert:  { type: Boolean, default: false },
+  out_of_stock:     { type: Boolean, default: false },
 
-  last_counted_at: { type: Date },
-  last_counted_qty: { type: Number },
-  last_movement_at: { type: Date },
-  batch_id: { type: String },
-
-  low_stock_alert: { type: Boolean, default: false },
-  overstock_alert: { type: Boolean, default: false },
+  last_movement_at: { type: Date, default: null },
+  last_counted_at:  { type: Date, default: null },
+  last_counted_qty: { type: Number, default: null },
 
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
+}, {
+  collection: 'materialstocks',
 });
 
-inventoryStockSchema.index({
-  product_id: 1,
-  variant_id: 1,
-  unit_id: 1,
-  warehouse_id: 1,
-  location_id: 1
-}, { unique: true });
+// Unique: 1 vật tư chỉ có 1 dòng tồn kho per kho
+materialStockSchema.index({ material_id: 1, warehouse_id: 1 }, { unique: true });
 
-inventoryStockSchema.pre('save', function(next) {
-  this.quantity_available = this.quantity_on_hand - this.quantity_reserved;
-  this.total_cost = this.quantity_on_hand * (this.unit_cost || 0);
-  this.updated_at = Date.now();
+materialStockSchema.pre('save', function (next) {
+  this.quantity_available = Math.max(0, this.quantity_on_hand - this.quantity_reserved);
+  this.total_value        = this.quantity_on_hand * (this.unit_cost || 0);
+  this.low_stock_alert    = this.reorder_point > 0 && this.quantity_available <= this.reorder_point;
+  this.out_of_stock       = this.quantity_on_hand <= 0;
+  this.updated_at         = Date.now();
   next();
 });
 
-module.exports = mongoose.model('InventoryStock', inventoryStockSchema);
+// Recalc khi findOneAndUpdate
+materialStockSchema.pre('findOneAndUpdate', function (next) {
+  const upd = this.getUpdate();
+  if (upd?.$inc) this.set({ updated_at: Date.now() });
+  next();
+});
+delete mongoose.models['MaterialStock'];
+module.exports = mongoose.model('MaterialStock', materialStockSchema);

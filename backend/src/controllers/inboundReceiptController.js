@@ -24,7 +24,7 @@ const processItems = (items) => {
   let total_cost     = 0;
   const processed = items.map(it => {
     const qty        = Number(it.quantity)          || 0;
-    const qty_rcv    = Number(it.quantity_received) || qty; // default = qty if not set
+    const qty_rcv    = Number(it.quantity_received) || qty;
     const unit_cost  = Number(it.unit_cost)         || 0;
     const total      = qty_rcv * unit_cost;
     total_quantity  += qty_rcv;
@@ -64,7 +64,7 @@ exports.getById = async (req, res) => {
     const item = await InboundReceipt.findById(req.params.id)
       .populate('warehouse_id', 'name code warehouse_name warehouse_code')
       .populate('partner_id',   'name object_name object_code phone')
-      .populate('items.material_id', 'product_code product_name units unit has_expiry_date default_shelf_life_days')
+      .populate('items.material_id', 'product_code product_name units unit has_expiry_date default_shelf_life_days purchase_price selling_price')
       .lean();
     if (!item) return res.status(404).json({ message: 'Không tìm thấy phiếu nhập' });
     res.json({ data: item });
@@ -115,12 +115,7 @@ exports.update = async (req, res) => {
 
     const updated = await InboundReceipt.findByIdAndUpdate(
       req.params.id,
-      {
-        ...req.body,
-        items: processed,
-        total_quantity,
-        total_cost,
-      },
+      { ...req.body, items: processed, total_quantity, total_cost },
       { new: true }
     )
       .populate('warehouse_id', 'name code')
@@ -133,47 +128,66 @@ exports.update = async (req, res) => {
 };
 
 // ── PATCH /api/inbound-receipts/:id/confirm ───────────────────────────────────
-// Xác nhận phiếu → cộng MaterialStock + tạo MaterialBatch nếu có HSD
+// Xác nhận phiếu → cộng MaterialStock (weighted average cho GIÁ VỐN TỒN KHO)
+// ⚠️ KHÔNG đụng đến Material.purchase_price/selling_price — giá đó CỐ ĐỊNH,
+//    chỉ sửa tay ở trang Vật Tư, không bị phiếu nhập ghi đè.
 exports.confirm = async (req, res) => {
   try {
     const receipt = await InboundReceipt.findById(req.params.id)
       .populate('items.material_id', 'product_code product_name has_expiry_date default_shelf_life_days')
       .lean();
-    if (!receipt) return res.status(404).json({ message: 'Không tìm thấy phiếu' });
+    if (!receipt)                       return res.status(404).json({ message: 'Không tìm thấy phiếu' });
     if (receipt.status === 'confirmed') return res.status(400).json({ message: 'Phiếu đã xác nhận rồi' });
     if (receipt.status === 'cancelled') return res.status(400).json({ message: 'Phiếu đã bị huỷ' });
 
     for (const it of receipt.items) {
-      const qty = it.quantity_received || it.quantity || 0;
-      if (qty <= 0) continue;
+      const inboundQty = it.quantity_received || it.quantity || 0;
+      if (inboundQty <= 0) continue;
 
       const materialId  = it.material_id?._id || it.material_id;
       const warehouseId = receipt.warehouse_id;
+      const inboundCost = Number(it.unit_cost) || 0;
 
-      // 1. Cộng tồn kho MaterialStock
-      //    Lưu ý: MaterialStock dùng product_id (không phải material_id)
+      // ── Weighted Average Cost — chỉ áp dụng cho GIÁ VỐN TỒN KHO (MaterialStock.unit_cost)
+      //    Đây KHÁC với Material.purchase_price (giá tham khảo cố định do admin set)
+      const currentStock = await MaterialStock.findOne(
+        { material_id: materialId, warehouse_id: warehouseId }
+      ).lean();
+
+      const oldQty  = currentStock?.quantity_on_hand || 0;
+      const oldCost = currentStock?.unit_cost         || 0;
+      const newQty  = oldQty + inboundQty;
+
+      const newUnitCost = inboundCost > 0
+        ? Math.round(((oldQty * oldCost) + (inboundQty * inboundCost)) / newQty)
+        : oldCost;
+
+      const newTotalValue = newQty * newUnitCost;
+
       await MaterialStock.findOneAndUpdate(
-        { product_id: materialId, warehouse_id: warehouseId },
+        { material_id: materialId, warehouse_id: warehouseId },
         {
-          $inc: { quantity_on_hand: qty, quantity_available: qty },
+          $inc: { quantity_on_hand: inboundQty, quantity_available: inboundQty },
           $set: {
-            unit_cost:           it.unit_cost || 0,
-            last_movement_at:    new Date(),
-          },
-          $setOnInsert: {
-            stock_id: `${materialId}-${warehouseId}-${Date.now()}`,
+            unit_cost:        newUnitCost,
+            total_value:      newTotalValue,
+            out_of_stock:     false,
+            low_stock_alert:  false,
+            last_movement_at: new Date(),
+            updated_at:       new Date(),
           },
         },
         { upsert: true, new: true }
       );
 
-      // 2. Tạo MaterialBatch nếu vật tư có track HSD
-      const material = it.material_id;
-      const hasExpiry = material?.has_expiry_date;
-      const expDate   = it.expiry_date;
+      // ❌ ĐÃ BỎ: không còn ghi đè Material.purchase_price ở đây nữa.
+      //    Giá vật tư giờ chỉ thay đổi khi admin sửa tay trong trang Vật Tư.
 
-      // Auto-calc HSD từ NSX + default_shelf_life_days nếu chưa có
-      let resolvedExpiry = expDate;
+      // ── Tạo MaterialBatch nếu vật tư có track HSD ─────────────────────────
+      const material  = it.material_id;
+      const hasExpiry = material?.has_expiry_date;
+
+      let resolvedExpiry = it.expiry_date || null;
       if (!resolvedExpiry && it.manufacture_date && material?.default_shelf_life_days) {
         const d = new Date(it.manufacture_date);
         d.setDate(d.getDate() + material.default_shelf_life_days);
@@ -186,39 +200,39 @@ exports.confirm = async (req, res) => {
           await MaterialBatch.findOneAndUpdate(
             { material_id: materialId, warehouse_id: warehouseId, batch_no: batchNo },
             {
-              $inc: { quantity: qty },
+              $inc: { quantity: inboundQty },
               $set: {
                 manufacture_date: it.manufacture_date || null,
                 expiry_date:      resolvedExpiry,
-                unit_cost:        it.unit_cost || 0,
+                unit_cost:        inboundCost,
               },
               $setOnInsert: { status: 'active' },
             },
             { upsert: true, new: true }
           );
         } catch (_) {
-          // Nếu batch_no trùng thì tạo batch mới với suffix
           await MaterialBatch.create({
             material_id:      materialId,
             warehouse_id:     warehouseId,
             batch_no:         `${batchNo}-${Date.now()}`,
             manufacture_date: it.manufacture_date || null,
             expiry_date:      resolvedExpiry,
-            quantity:         qty,
-            unit_cost:        it.unit_cost || 0,
+            quantity:         inboundQty,
+            unit_cost:        inboundCost,
           });
         }
       }
     }
 
-    // Cập nhật trạng thái phiếu
     await InboundReceipt.findByIdAndUpdate(req.params.id, {
       status:       'confirmed',
       confirmed_by: req.user?.username || 'system',
+      confirmed_at: new Date(),
     });
 
-    res.json({ message: `Xác nhận phiếu ${receipt.receipt_code} thành công — đã cộng tồn kho` });
+    res.json({ message: `Xác nhận phiếu ${receipt.receipt_code} thành công — đã cập nhật tồn kho` });
   } catch (err) {
+    console.error('[confirm]', err);
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   }
 };

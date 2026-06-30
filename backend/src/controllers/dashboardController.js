@@ -70,10 +70,11 @@ exports.getStats = async (req, res) => {
 };
 
 // GET /api/dashboard/low-stock
+// ✅ FIXED: Material thực dùng product_name/product_code (material_name chỉ là virtual)
 exports.getLowStock = async (req, res) => {
   try {
     const stocks = await MaterialStock.find()
-      .populate('material_id', 'material_name material_code')
+      .populate('material_id', 'product_name product_code')
       .lean();
 
     const map = {};
@@ -83,8 +84,8 @@ exports.getLowStock = async (req, res) => {
       if (!map[mid]) {
         map[mid] = {
           _id: mid,
-          name: s.material_id?.material_name || '—',
-          material_code: s.material_id?.material_code || '',
+          name: s.material_id?.product_name || '—',
+          material_code: s.material_id?.product_code || '',
           quantity: 0,
           threshold: s.min_stock || 10,
         };
@@ -104,20 +105,22 @@ exports.getLowStock = async (req, res) => {
 };
 
 // GET /api/dashboard/recent-transactions
+// ✅ FIXED: Partner field thực là 'name' (không phải partner_name)
+// ✅ FIXED: Warehouse field thực là 'name' (không phải warehouse_name)
 exports.getRecentTransactions = async (req, res) => {
   try {
     const [inbounds, outbounds] = await Promise.all([
       InboundReceipt.find()
         .sort({ created_at: -1 })
         .limit(5)
-        .populate('partner_id', 'partner_name')
-        .populate('warehouse_id', 'warehouse_name')
+        .populate('partner_id', 'name')
+        .populate('warehouse_id', 'name')
         .lean(),
       OutboundIssue.find()
         .sort({ created_at: -1 })
         .limit(5)
-        .populate('partner_id', 'partner_name')
-        .populate('warehouse_id', 'warehouse_name')
+        .populate('partner_id', 'name')
+        .populate('warehouse_id', 'name')
         .lean(),
     ]);
 
@@ -176,10 +179,11 @@ exports.getChartData = async (req, res) => {
 };
 
 // GET /api/dashboard/top-products
+// ✅ FIXED: Material thực dùng product_name/product_code
 exports.getTopProducts = async (req, res) => {
   try {
     const stocks = await MaterialStock.find()
-      .populate('material_id', 'material_name material_code')
+      .populate('material_id', 'product_name product_code')
       .lean();
 
     const map = {};
@@ -189,8 +193,8 @@ exports.getTopProducts = async (req, res) => {
       if (!map[mid]) {
         map[mid] = {
           _id: mid,
-          name: s.material_id?.material_name || '—',
-          material_code: s.material_id?.material_code || '',
+          name: s.material_id?.product_name || '—',
+          material_code: s.material_id?.product_code || '',
           totalQuantity: 0,
         };
       }

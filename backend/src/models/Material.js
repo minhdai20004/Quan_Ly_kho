@@ -37,7 +37,8 @@ const materialSchema = new mongoose.Schema({
   // Tồn kho (đơn vị base) — sync từ Inventory module sau
   // Hiện tại dùng tạm để hiển thị
   stock: { type: Number, default: 0 },
-
+  selling_price:  { type: Number, default: 0 },
+  purchase_price: { type: Number, default: 0 },
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
   collection: 'products',

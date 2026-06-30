@@ -1,537 +1,598 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { productApi } from '../services/productService';
+// ================================================================
+//  WMS — REPORTS  v3.1  (fixed: no dashboard API, real field names)
+//  Paste to: src/views/Reports.jsx
+// ================================================================
+import { useState, useEffect, useCallback } from 'react';
+import {
+  ChartBar, ArrowSquareIn, ArrowSquareOut, Package,
+  Warning, TrendUp, TrendDown, ArrowClockwise,
+} from '@phosphor-icons/react';
 import api from '../services/api';
 
-const fmtCurrency = (n) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n || 0);
-const fmtDate = (d) => new Date(d).toLocaleString('vi-VN');
+/* ── Helpers ──────────────────────────────────────────────────── */
+const fmt    = n => Number(n||0).toLocaleString('vi-VN');
+const fmtCur = n => Number(n||0).toLocaleString('vi-VN',{style:'currency',currency:'VND'});
+const fmtDate= s => s ? new Date(s).toLocaleDateString('vi-VN') : '—';
 
-const TYPE_MAP = {
-  inbound:  { label: 'Nhập',       color: '#16a34a', bg: '#f0fdf4', sign: '+' },
-  outbound: { label: 'Xuất',       color: '#dc2626', bg: '#fef2f2', sign: '-' },
-  initial:  { label: 'Khởi tạo',  color: '#2563eb', bg: '#eff6ff', sign: '+' },
-  adjust:   { label: 'Điều chỉnh', color: '#d97706', bg: '#fffbeb', sign: '±' },
-};
+/* ── Shimmer ──────────────────────────────────────────────────── */
+const Shimmer = ({w='100%',h=16,r=8,style={}}) => (
+  <div style={{width:w,height:h,borderRadius:r,background:'linear-gradient(90deg,#f1f5f9 25%,#e8edf2 50%,#f1f5f9 75%)',backgroundSize:'400% 100%',animation:'shimmer 1.6s ease-in-out infinite',...style}}/>
+);
 
-// ── Mini bar chart ──────────────────────────────────────────────
-const MonthlyChart = ({ transactions }) => {
-  const data = useMemo(() => {
-    const map = {};
-    transactions.forEach(t => {
-      const d = new Date(t.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!map[key]) map[key] = { in: 0, out: 0 };
-      if (['inbound', 'initial'].includes(t.transaction_type)) map[key].in += t.quantity;
-      if (t.transaction_type === 'outbound') map[key].out += t.quantity;
-    });
-    return Object.entries(map).sort().slice(-6).map(([k, v]) => ({
-      label: k.slice(5) + '/' + k.slice(0, 4),
-      in: v.in, out: v.out,
-    }));
-  }, [transactions]);
-
-  if (data.length === 0) return null;
-
-  const max = Math.max(...data.flatMap(d => [d.in, d.out]), 1);
-  const CHART_H = 120;
-  const BAR_W = 28;
-
-  return (
-    <div style={{ background: 'white', borderRadius: '14px', padding: '1.25rem 1.5rem', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', marginBottom: '1.5rem' }}>
-      <div style={{ fontWeight: '700', color: '#1a202c', marginBottom: '1rem', fontSize: '0.95rem' }}>
-        📊 Biểu đồ nhập / xuất theo tháng
-      </div>
-
-      {/* Chart area */}
-      <div style={{ overflowX: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2rem', height: `${CHART_H + 28}px`, minWidth: `${data.length * 100}px`, paddingBottom: '0' }}>
-          {data.map((d, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: '1' }}>
-              {/* Bars */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '6px', height: `${CHART_H}px` }}>
-                {/* Nhập */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: '700', opacity: d.in > 0 ? 1 : 0 }}>{d.in}</span>
-                  <div
-                    title={`Nhập: ${d.in}`}
-                    style={{
-                      width: `${BAR_W}px`,
-                      background: 'linear-gradient(180deg, #4ade80, #16a34a)',
-                      borderRadius: '4px 4px 0 0',
-                      height: `${Math.round((d.in / max) * (CHART_H - 20))}px`,
-                      minHeight: d.in > 0 ? '4px' : '0',
-                      transition: 'height 0.4s ease',
-                      cursor: 'default',
-                    }}
-                  />
-                </div>
-                {/* Xuất */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: '700', opacity: d.out > 0 ? 1 : 0 }}>{d.out}</span>
-                  <div
-                    title={`Xuất: ${d.out}`}
-                    style={{
-                      width: `${BAR_W}px`,
-                      background: 'linear-gradient(180deg, #f87171, #dc2626)',
-                      borderRadius: '4px 4px 0 0',
-                      height: `${Math.round((d.out / max) * (CHART_H - 20))}px`,
-                      minHeight: d.out > 0 ? '4px' : '0',
-                      transition: 'height 0.4s ease',
-                      cursor: 'default',
-                    }}
-                  />
-                </div>
-              </div>
-              {/* Label tháng */}
-              <div style={{ fontSize: '0.72rem', color: '#718096', whiteSpace: 'nowrap' }}>{d.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#4a5568' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#16a34a' }} /> Nhập kho
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#4a5568' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#dc2626' }} /> Xuất kho
-        </div>
-      </div>
+/* ── KPI Card ─────────────────────────────────────────────────── */
+const KPICard = ({icon,label,value,accent,loading,sub}) => (
+  <div style={{background:'#fff',borderRadius:16,padding:'20px 22px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)',transition:'box-shadow .2s,transform .2s',cursor:'default'}}
+    onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 8px 32px -8px rgba(0,0,0,.12)';e.currentTarget.style.transform='translateY(-2px)';}}
+    onMouseLeave={e=>{e.currentTarget.style.boxShadow='0 4px 24px -8px rgba(0,0,0,.06)';e.currentTarget.style.transform='translateY(0)';}}>
+    <div style={{width:40,height:40,borderRadius:11,background:`${accent}18`,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:14}}>
+      {icon}
     </div>
-  );
-};
-
-// ── Main component ───────────────────────────────────────────────
-const Reports = () => {
-  const [transactions, setTransactions] = useState([]);
-  const [products, setProducts]         = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [tab, setTab]                   = useState('all');       // all | inbound | outbound
-  const [dateFilter, setDateFilter]     = useState({ start: '', end: '' });
-  const [search, setSearch]             = useState('');
-  const [currentPage, setCurrentPage]   = useState(1);
-  const [stockPage, setStockPage]       = useState(1);
-  const PAGE_SIZE = 20;
-  const STOCK_PAGE_SIZE = 15;
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [prodRes, txnRes] = await Promise.all([
-        productApi.getAll({ limit: 200 }),
-        api.get('/transactions?limit=1000'),
-      ]);
-      setProducts(prodRes.data || []);
-      setTransactions(txnRes.data || []);
-    } catch (err) {
-      console.error('Reports fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  // Filter theo tab + ngày + search
-  const filtered = useMemo(() => {
-    return transactions.filter(t => {
-      // Tab
-      if (tab === 'inbound'  && !['inbound', 'initial'].includes(t.transaction_type)) return false;
-      if (tab === 'outbound' && t.transaction_type !== 'outbound') return false;
-
-      // Ngày
-      const tDate = new Date(t.created_at);
-      if (dateFilter.start && tDate < new Date(dateFilter.start)) return false;
-      if (dateFilter.end   && tDate > new Date(dateFilter.end + 'T23:59:59')) return false;
-
-      // Search: tên SP, mã SP, người TH, NCC/KH, ghi chú
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const hay = [t.product_name, t.product_code, t.performed_by, t.supplier_name, t.customer_name, t.note]
-          .filter(Boolean).join(' ').toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-
-      return true;
-    });
-  }, [transactions, tab, dateFilter, search]);
-
-  // Pagination for transactions
-  const totalTxn = filtered.length;
-  const totalTxnPages = Math.max(1, Math.ceil(totalTxn / PAGE_SIZE));
-  const safeTxnPage = Math.min(currentPage, totalTxnPages);
-  const paginatedTxn = filtered.slice((safeTxnPage - 1) * PAGE_SIZE, safeTxnPage * PAGE_SIZE);
-
-  const stats = useMemo(() => {
-    const inn = transactions.filter(t => ['inbound', 'initial'].includes(t.transaction_type));
-    const out = transactions.filter(t => t.transaction_type === 'outbound');
-    const totalStock = products.reduce((s, p) => {
-      const qty = p.stocks?.reduce((a, b) => a + (b.quantity_on_hand || 0), 0) || 0;
-      return s + qty;
-    }, 0);
-    const totalValue = products.reduce((s, p) => {
-      const qty = p.stocks?.reduce((a, b) => a + (b.quantity_on_hand || 0), 0) || 0;
-      const cost = p.prices?.[0]?.cost_price || 0;
-      return s + qty * cost;
-    }, 0);
-    return {
-      totalIn:  inn.reduce((s, t) => s + t.quantity, 0),
-      totalOut: out.reduce((s, t) => s + t.quantity, 0),
-      inCount: inn.length, outCount: out.length,
-      totalStock, totalValue,
-      productCount: products.length,
-    };
-  }, [transactions, products]);
-
-  const resetFilters = () => { setDateFilter({ start: '', end: '' }); setSearch(''); setCurrentPage(1); };
-
-  // Sort products by qty asc, paginate
-  const sortedProducts = useMemo(() => {
-    return [...products].sort((a, b) => {
-      const qtyA = a.stocks?.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) || 0;
-      const qtyB = b.stocks?.reduce((s, x) => s + (x.quantity_on_hand || 0), 0) || 0;
-      return qtyA - qtyB;
-    });
-  }, [products]);
-  const totalStockPages = Math.max(1, Math.ceil(sortedProducts.length / STOCK_PAGE_SIZE));
-  const safeStockPage = Math.min(stockPage, totalStockPages);
-  const paginatedProducts = sortedProducts.slice((safeStockPage - 1) * STOCK_PAGE_SIZE, safeStockPage * STOCK_PAGE_SIZE);
-
-  const exportTxt = (type) => {
-    const lines = [];
-    const now = new Date().toLocaleString('vi-VN');
-    if (type === 'summary') {
-      lines.push('BÁO CÁO TỔNG QUAN KHO', `Ngày xuất: ${now}`, '');
-      lines.push(`Tổng nhập kho  : ${stats.totalIn} đơn vị (${stats.inCount} giao dịch)`);
-      lines.push(`Tổng xuất kho  : ${stats.totalOut} đơn vị (${stats.outCount} giao dịch)`);
-      lines.push(`Tổng tồn kho   : ${stats.totalStock} đơn vị`);
-      lines.push(`Giá trị tồn kho: ${fmtCurrency(stats.totalValue)}`);
-    } else if (type === 'detail') {
-      lines.push('BÁO CÁO CHI TIẾT GIAO DỊCH', `Ngày xuất: ${now}`, '');
-      filtered.forEach((t, i) => {
-        const info = TYPE_MAP[t.transaction_type] || TYPE_MAP.adjust;
-        lines.push(`${i+1}. [${info.label}] ${t.product_name} (${t.product_code})`);
-        lines.push(`   SL: ${info.sign}${t.quantity} | Trước: ${t.quantity_before} → Sau: ${t.quantity_after}`);
-        lines.push(`   Kho: ${t.warehouse} | Người TH: ${t.performed_by} | ${fmtDate(t.created_at)}`);
-        if (t.note) lines.push(`   Ghi chú: ${t.note}`);
-        lines.push('');
-      });
-    } else {
-      lines.push('BÁO CÁO TỒN KHO', `Ngày xuất: ${now}`, '');
-      products.forEach((p, i) => {
-        const qty = p.stocks?.reduce((a, b) => a + (b.quantity_on_hand || 0), 0) || 0;
-        const cost = p.prices?.[0]?.cost_price || 0;
-        lines.push(`${i+1}. ${p.product_name} (${p.product_code})`);
-        lines.push(`   Tồn: ${qty} | Giá vốn: ${fmtCurrency(cost)}`);
-        lines.push(`   Giá trị tồn: ${fmtCurrency(qty * cost)}`);
-        lines.push('');
-      });
-      lines.push(`TỔNG GIÁ TRỊ TỒN KHO: ${fmtCurrency(stats.totalValue)}`);
-    }
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `bao-cao-${type}-${Date.now()}.txt`; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // ── Styles ──
-  const cardStyle = (color) => ({
-    flex: '1', minWidth: '180px', background: 'white', borderRadius: '14px',
-    padding: '1.25rem 1.5rem', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', borderLeft: `4px solid ${color}`,
-  });
-  const btnStyle = (bg) => ({
-    padding: '0.55rem 1rem', fontSize: '0.85rem', fontWeight: '600',
-    background: bg, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer',
-  });
-  const tabStyle = (active) => ({
-    padding: '0.55rem 1.25rem', fontWeight: '600', fontSize: '0.88rem', cursor: 'pointer', border: 'none',
-    borderRadius: '8px', transition: 'all 0.15s',
-    background: active ? '#6366f1' : 'transparent',
-    color: active ? 'white' : '#718096',
-  });
-
-  return (
-    <div style={{ padding: '1.5rem', background: '#f7f9fc', minHeight: '100vh' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: '700', color: '#1a202c' }}>Báo Cáo Kho Hàng</h1>
-        <p style={{ margin: '0.25rem 0 0', color: '#718096', fontSize: '0.9rem' }}>Lịch sử nhập / xuất kho và tồn kho hiện tại</p>
-      </div>
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '4rem', color: '#718096' }}>⏳ Đang tải dữ liệu...</div>
-      ) : (
-        <>
-          {/* Stats cards */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-            <div style={cardStyle('#48bb78')}>
-              <div style={{ fontSize: '0.82rem', color: '#718096', marginBottom: '0.4rem' }}>Tổng nhập kho</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#16a34a' }}>{stats.totalIn.toLocaleString()}</div>
-              <div style={{ fontSize: '0.8rem', color: '#718096' }}>đơn vị • {stats.inCount} giao dịch</div>
-            </div>
-            <div style={cardStyle('#f56565')}>
-              <div style={{ fontSize: '0.82rem', color: '#718096', marginBottom: '0.4rem' }}>Tổng xuất kho</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#dc2626' }}>{stats.totalOut.toLocaleString()}</div>
-              <div style={{ fontSize: '0.8rem', color: '#718096' }}>đơn vị • {stats.outCount} giao dịch</div>
-            </div>
-            <div style={cardStyle('#4299e1')}>
-              <div style={{ fontSize: '0.82rem', color: '#718096', marginBottom: '0.4rem' }}>Tồn kho hiện tại</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#2563eb' }}>{stats.totalStock.toLocaleString()}</div>
-              <div style={{ fontSize: '0.8rem', color: '#718096' }}>{stats.productCount} sản phẩm</div>
-            </div>
-            <div style={cardStyle('#805ad5')}>
-              <div style={{ fontSize: '0.82rem', color: '#718096', marginBottom: '0.4rem' }}>Giá trị tồn kho</div>
-              <div style={{ fontSize: '1.3rem', fontWeight: '700', color: '#553c9a' }}>{fmtCurrency(stats.totalValue)}</div>
-              <div style={{ fontSize: '0.8rem', color: '#718096' }}>theo giá vốn</div>
-            </div>
-          </div>
-
-          {/* Biểu đồ */}
-          <MonthlyChart transactions={transactions} />
-
-          {/* Inventory table */}
-          <div style={{ background: 'white', borderRadius: '14px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', marginBottom: '1.5rem', overflow: 'hidden' }}>
-            <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: '700', color: '#1a202c' }}>📦 Tồn kho sản phẩm ({products.length}) <span style={{ fontSize: '0.78rem', color: '#a0aec0', fontWeight: '400' }}>— sắp xếp tồn kho tăng dần</span></span>
-              <button onClick={() => exportTxt('stock')} style={btnStyle('#ed8936')}>📦 Xuất tồn kho</button>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f7fafc' }}>
-                    {['#', 'Mã SP', 'Tên sản phẩm', 'Danh mục', 'Tồn kho', 'Giá vốn', 'Giá bán', 'Giá trị tồn'].map(h => (
-                      <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.78rem', fontWeight: '700', color: '#718096', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedProducts.map((p, i) => {
-                    const qty  = p.stocks?.reduce((a, b) => a + (b.quantity_on_hand || 0), 0) || 0;
-                    const cost = p.prices?.[0]?.cost_price || 0;
-                    const sell = p.prices?.[0]?.selling_price || 0;
-                    const cat  = p.category_id;
-                    const catLabel = cat ? (cat.parent_id?.name ? `${cat.parent_id.name} (${cat.name})` : cat.name) : '—';
-                    return (
-                      <tr key={p._id} style={{ borderBottom: '1px solid #f0f0f0', background: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#a0aec0' }}>{(safeStockPage - 1) * STOCK_PAGE_SIZE + i + 1}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#6366f1', fontWeight: '600' }}>{p.product_code}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: '600', color: '#1a202c' }}>{p.product_name}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#718096' }}>{catLabel}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: '700', color: qty === 0 ? '#e53e3e' : qty <= 5 ? '#d97706' : '#16a34a' }}>{qty}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#4a5568' }}>{fmtCurrency(cost)}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#4a5568' }}>{fmtCurrency(sell)}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', fontWeight: '600', color: '#553c9a' }}>{fmtCurrency(qty * cost)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {products.length === 0 && <div style={{ textAlign: 'center', padding: '2rem', color: '#718096' }}>Không có sản phẩm nào</div>}
-            </div>
-            {/* Stock Pagination */}
-            {totalStockPages > 1 && (() => {
-              const getPageNums = () => {
-                const nums = new Set([1, totalStockPages]);
-                for (let i = Math.max(2, safeStockPage - 1); i <= Math.min(totalStockPages - 1, safeStockPage + 1); i++) nums.add(i);
-                return [...nums].sort((a, b) => a - b);
-              };
-              const pageNums = getPageNums();
-              const btnBase = { height: '34px', minWidth: '34px', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' };
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.875rem 1.5rem', borderTop: '1px solid #f0f0f0', gap: '0.4rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <button onClick={() => setStockPage(p => Math.max(1, p - 1))} disabled={safeStockPage === 1}
-                      style={{ ...btnBase, padding: '0 0.75rem', opacity: safeStockPage === 1 ? 0.35 : 1, cursor: safeStockPage === 1 ? 'not-allowed' : 'pointer', color: '#111827' }}
-                      onMouseEnter={e => { if (safeStockPage !== 1) e.currentTarget.style.background = '#f0f4ff'; }}
-                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                      Truoc
-                    </button>
-                    {pageNums.map((num, i) => {
-                      const prev = pageNums[i - 1];
-                      const isActive = num === safeStockPage;
-                      return (
-                        <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          {prev && num - prev > 1 && <span style={{ color: '#a0aec0', padding: '0 0.2rem' }}>...</span>}
-                          <button onClick={() => setStockPage(num)}
-                            style={{ ...btnBase, background: isActive ? '#6366f1' : 'white', color: isActive ? 'white' : '#374151', borderColor: isActive ? '#6366f1' : '#e2e8f0' }}
-                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f4ff'; }}
-                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
-                            {num}
-                          </button>
-                        </div>
-                      );
-                    })}
-                    <button onClick={() => setStockPage(p => Math.min(totalStockPages, p + 1))} disabled={safeStockPage === totalStockPages}
-                      style={{ ...btnBase, padding: '0 0.75rem', opacity: safeStockPage === totalStockPages ? 0.35 : 1, cursor: safeStockPage === totalStockPages ? 'not-allowed' : 'pointer', color: '#111827' }}
-                      onMouseEnter={e => { if (safeStockPage !== totalStockPages) e.currentTarget.style.background = '#f0f4ff'; }}
-                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                      Sau
-                    </button>
-                  </div>
-                  <span style={{ fontSize: '0.8rem', color: '#718096' }}>
-                    Trang <b>{safeStockPage}</b>/{totalStockPages} · <b>{products.length}</b> sản phẩm
-                  </span>
-                </div>
-              );
-            })()}
-
-          </div>
-
-          {/* Transaction section */}
-          <div style={{ background: 'white', borderRadius: '14px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
-            {/* Tabs */}
-            <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', gap: '0.25rem', background: '#f7fafc', borderRadius: '10px', padding: '0.25rem' }}>
-                <button style={tabStyle(tab === 'all')}      onClick={() => setTab('all')}>Tất cả ({transactions.length})</button>
-                <button style={tabStyle(tab === 'inbound')}  onClick={() => setTab('inbound')}>📥 Nhập ({transactions.filter(t => ['inbound','initial'].includes(t.transaction_type)).length})</button>
-                <button style={tabStyle(tab === 'outbound')} onClick={() => setTab('outbound')}>📤 Xuất ({transactions.filter(t => t.transaction_type === 'outbound').length})</button>
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={() => exportTxt('summary')} style={btnStyle('#6366f1')}>📄 Tổng quan</button>
-                <button onClick={() => exportTxt('detail')}  style={btnStyle('#48bb78')}>📋 Chi tiết</button>
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div style={{ padding: '0.875rem 1.5rem', borderBottom: '1px solid #f0f0f0', background: '#fafbfc', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-              {/* Search */}
-              <div style={{ position: 'relative', flex: '1', minWidth: '220px' }}>
-                <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#a0aec0', fontSize: '0.9rem' }}>🔍</span>
-                <input
-                  type="text"
-                  placeholder={tab === 'inbound' ? 'Tìm sản phẩm, nhà cung cấp, người nhập...' : tab === 'outbound' ? 'Tìm sản phẩm, khách hàng, người xuất...' : 'Tìm sản phẩm, NCC, khách hàng, người TH...'}
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem 0.75rem 0.5rem 2.1rem', border: '2px solid #e2e8f0', borderRadius: '8px', fontSize: '0.875rem', background: 'white', color: '#1a202c', boxSizing: 'border-box', outline: 'none' }}
-                />
-              </div>
-              {/* Date range */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.82rem', color: '#718096', fontWeight: '600', whiteSpace: 'nowrap' }}>Từ ngày:</label>
-                <input type="date" value={dateFilter.start} onChange={e => setDateFilter(f => ({ ...f, start: e.target.value }))}
-                  style={{ padding: '0.45rem', border: '2px solid #e2e8f0', borderRadius: '6px', fontSize: '0.85rem', background: 'white', color: '#1a202c', outline: 'none' }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.82rem', color: '#718096', fontWeight: '600', whiteSpace: 'nowrap' }}>Đến ngày:</label>
-                <input type="date" value={dateFilter.end} onChange={e => setDateFilter(f => ({ ...f, end: e.target.value }))}
-                  style={{ padding: '0.45rem', border: '2px solid #e2e8f0', borderRadius: '6px', fontSize: '0.85rem', background: 'white', color: '#1a202c', outline: 'none' }} />
-              </div>
-              {(search || dateFilter.start || dateFilter.end) && (
-                <button onClick={resetFilters}
-                  style={{ padding: '0.45rem 0.875rem', border: '2px solid #e2e8f0', borderRadius: '6px', background: 'white', cursor: 'pointer', fontSize: '0.82rem', color: '#718096', fontWeight: '600' }}>
-                  ✕ Đặt lại
-                </button>
-              )}
-              <span style={{ fontSize: '0.82rem', color: '#718096', marginLeft: 'auto' }}>
-                {filtered.length} giao dịch
-              </span>
-            </div>
-
-            {/* Table */}
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f7fafc' }}>
-                    {['#', 'Sản phẩm', 'Loại', 'Số lượng', 'Trước → Sau', 'Kho', tab === 'inbound' ? 'Nhà cung cấp' : tab === 'outbound' ? 'Khách hàng' : 'NCC / Khách', 'Ghi chú', 'Người TH', 'Thời gian'].map(h => (
-                      <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#718096', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedTxn.map((t, i) => {
-                    const info = TYPE_MAP[t.transaction_type] || TYPE_MAP.adjust;
-                    let party = t.supplier_name || t.customer_name || '';
-                    if (!party && t.note) {
-                      const khMatch = t.note.match(/KH:\s*([^-\n]+)/);
-                      const nccMatch = t.note.match(/NCC:\s*([^-\n]+)/);
-                      party = (khMatch?.[1] || nccMatch?.[1] || '').trim();
-                    }
-                    party = party || '—';
-                    return (
-                      <tr key={t._id} style={{ borderBottom: '1px solid #f0f0f0', background: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#a0aec0' }}>{i + 1}</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>
-                          <div style={{ fontWeight: '600', color: '#1a202c', fontSize: '0.88rem' }}>{t.product_name}</div>
-                          <div style={{ fontSize: '0.75rem', color: '#a0aec0' }}>{t.product_code}</div>
-                        </td>
-                        <td style={{ padding: '0.75rem 1rem' }}>
-                          <span style={{ padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.78rem', fontWeight: '700', background: info.bg, color: info.color }}>
-                            {info.label}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: '700', color: info.color, fontSize: '0.95rem' }}>{info.sign}{t.quantity}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#4a5568' }}>{t.quantity_before} → {t.quantity_after}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#718096' }}>{t.warehouse || '—'}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#4a5568' }}>{party}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', color: '#718096', maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.note || '—'}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: '#4a5568' }}>{t.performed_by}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.78rem', color: '#718096', whiteSpace: 'nowrap' }}>{fmtDate(t.created_at)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {filtered.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '2.5rem', color: '#718096' }}>
-                  {transactions.length === 0
-                    ? 'Chưa có giao dịch nào. Hãy nhập hoặc xuất hàng để tạo lịch sử.'
-                    : 'Không tìm thấy giao dịch phù hợp'}
-                </div>
-              )}
-            </div>
-
-            {/* Pagination */}
-            {totalTxnPages > 1 && (() => {
-              const getPageNums = () => {
-                const nums = new Set([1, totalTxnPages]);
-                for (let i = Math.max(2, safeTxnPage - 1); i <= Math.min(totalTxnPages - 1, safeTxnPage + 1); i++) nums.add(i);
-                return [...nums].sort((a, b) => a - b);
-              };
-              const pageNums = getPageNums();
-              const btnBase = { height: '36px', minWidth: '36px', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' };
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid #f0f0f0', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safeTxnPage === 1}
-                      style={{ ...btnBase, padding: '0 0.875rem', opacity: safeTxnPage === 1 ? 0.35 : 1, cursor: safeTxnPage === 1 ? 'not-allowed' : 'pointer', color: '#111827' }}
-                      onMouseEnter={e => { if (safeTxnPage !== 1) e.currentTarget.style.background = '#f0f4ff'; }}
-                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                      ← Trước
-                    </button>
-                    {pageNums.map((num, i) => {
-                      const prev = pageNums[i - 1];
-                      const isActive = num === safeTxnPage;
-                      return (
-                        <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          {prev && num - prev > 1 && <span style={{ color: '#a0aec0', padding: '0 0.2rem' }}>…</span>}
-                          <button onClick={() => setCurrentPage(num)}
-                            style={{ ...btnBase, background: isActive ? '#6366f1' : 'white', color: isActive ? 'white' : '#374151', borderColor: isActive ? '#6366f1' : '#e2e8f0' }}
-                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f4ff'; }}
-                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
-                            {num}
-                          </button>
-                        </div>
-                      );
-                    })}
-                    <button onClick={() => setCurrentPage(p => Math.min(totalTxnPages, p + 1))} disabled={safeTxnPage === totalTxnPages}
-                      style={{ ...btnBase, padding: '0 0.875rem', opacity: safeTxnPage === totalTxnPages ? 0.35 : 1, cursor: safeTxnPage === totalTxnPages ? 'not-allowed' : 'pointer', color: '#111827' }}
-                      onMouseEnter={e => { if (safeTxnPage !== totalTxnPages) e.currentTarget.style.background = '#f0f4ff'; }}
-                      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                      Sau →
-                    </button>
-                  </div>
-                  <span style={{ fontSize: '0.82rem', color: '#718096' }}>
-                    Trang <b>{safeTxnPage}</b>/{totalTxnPages} · <b>{totalTxn}</b> giao dịch
-                  </span>
-                </div>
-              );
-            })()}
-          </div>
+    {loading
+      ? <><Shimmer h={28} w="60%" r={6} style={{marginBottom:8}}/><Shimmer h={13} w="80%" r={5}/></>
+      : <>
+          <div style={{fontSize:26,fontWeight:800,color:'#1e293b',lineHeight:1,letterSpacing:'-1px'}}>{value}</div>
+          <div style={{fontSize:13,color:'#64748b',marginTop:6,fontWeight:500}}>{label}</div>
+          {sub&&<div style={{fontSize:11,color:'#94a3b8',marginTop:3}}>{sub}</div>}
         </>
-      )}
+    }
+  </div>
+);
+
+/* ── Status Pill ──────────────────────────────────────────────── */
+const StatusPill = ({status}) => {
+  const map = {
+    confirmed: {label:'Đã xác nhận', color:'#16a34a', bg:'#dcfce7'},
+    draft:     {label:'Nháp',        color:'#d97706', bg:'#fef3c7'},
+    cancelled: {label:'Đã huỷ',      color:'#dc2626', bg:'#fee2e2'},
+    completed: {label:'Hoàn thành',  color:'#16a34a', bg:'#dcfce7'},
+  };
+  const m = map[status]||{label:status||'—',color:'#64748b',bg:'#f1f5f9'};
+  return <span style={{fontSize:11,padding:'2px 9px',borderRadius:20,fontWeight:700,background:m.bg,color:m.color,whiteSpace:'nowrap'}}>{m.label}</span>;
+};
+
+/* ── Empty Slate ──────────────────────────────────────────────── */
+const EmptySlate = ({text}) => (
+  <div style={{textAlign:'center',padding:'40px 20px',color:'#cbd5e1'}}>
+    <ChartBar size={36} style={{marginBottom:10,opacity:.4}}/>
+    <div style={{fontSize:13,fontWeight:600}}>{text}</div>
+  </div>
+);
+
+/* ── SVG Line Chart ───────────────────────────────────────────── */
+const LineChart = ({data,keys,colors,labels}) => {
+  const W=700,H=200,padX=56,padY=16;
+  const innerW=W-padX*2, innerH=H-padY*2;
+  if(!data?.length) return (
+    <div style={{height:H,display:'flex',alignItems:'center',justifyContent:'center',color:'#cbd5e1',fontSize:13}}>
+      Chưa có dữ liệu trong khoảng thời gian này
+    </div>
+  );
+  const maxVal = Math.max(...data.flatMap(d=>keys.map(k=>d[k]||0)),1);
+  const xStep  = innerW/Math.max(data.length-1,1);
+  const yScale = v => padY+innerH-((v/maxVal)*innerH);
+  const xAt    = i => padX+i*xStep;
+  const makePath = key => data.map((d,i)=>`${i===0?'M':'L'} ${xAt(i).toFixed(1)} ${yScale(d[key]||0).toFixed(1)}`).join(' ');
+  const makeArea = key => {
+    const line=makePath(key);
+    return `${line} L ${xAt(data.length-1).toFixed(1)} ${(padY+innerH).toFixed(1)} L ${padX} ${(padY+innerH).toFixed(1)} Z`;
+  };
+  const yTicks=[0,0.25,0.5,0.75,1].map(p=>({v:Math.round(maxVal*p),y:yScale(maxVal*p)}));
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H+28}`} style={{width:'100%',height:'auto'}}>
+        <defs>
+          {keys.map((k,ki)=>(
+            <linearGradient key={k} id={`grad-${k}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={colors[ki]} stopOpacity=".18"/>
+              <stop offset="100%" stopColor={colors[ki]} stopOpacity=".01"/>
+            </linearGradient>
+          ))}
+        </defs>
+        {yTicks.map(t=>(
+          <g key={t.v}>
+            <line x1={padX} x2={W-padX} y1={t.y} y2={t.y} stroke="#f1f5f9" strokeWidth={1}/>
+            <text x={padX-8} y={t.y+4} fontSize={9} fill="#cbd5e1" textAnchor="end">{fmt(t.v)}</text>
+          </g>
+        ))}
+        {keys.map((k,ki)=>(
+          <g key={k}>
+            <path d={makeArea(k)} fill={`url(#grad-${k})`}/>
+            <path d={makePath(k)} fill="none" stroke={colors[ki]} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+          </g>
+        ))}
+        {keys.map((k,ki)=>data.map((d,i)=>(
+          <circle key={`${k}-${i}`} cx={xAt(i)} cy={yScale(d[k]||0)} r={3.5} fill="#fff" stroke={colors[ki]} strokeWidth={2.5}/>
+        )))}
+        {data.map((d,i)=>(
+          i%Math.ceil(data.length/8)===0||i===data.length-1
+            ? <text key={i} x={xAt(i)} y={H+18} textAnchor="middle" fontSize={10} fill="#94a3b8">{d.date}</text>
+            : null
+        ))}
+      </svg>
+      <div style={{display:'flex',gap:20,marginTop:8}}>
+        {keys.map((k,ki)=>(
+          <div key={k} style={{display:'flex',alignItems:'center',gap:6}}>
+            <div style={{width:20,height:3,borderRadius:2,background:colors[ki]}}/>
+            <span style={{fontSize:12,color:'#64748b',fontWeight:600}}>{labels[ki]}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
 
-export default Reports;
+/* ── HBar ─────────────────────────────────────────────────────── */
+const HBar = ({label,code,value,maxVal,color,rank}) => {
+  const pct = maxVal>0?(value/maxVal)*100:0;
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'24px 1fr auto',gap:12,alignItems:'center',marginBottom:14}}>
+      <span style={{width:24,height:24,borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800,background:rank===1?'linear-gradient(135deg,#f59e0b,#d97706)':rank===2?'#94a3b8':rank===3?'#b45309':'#e2e8f0',color:rank<=3?'#fff':'#64748b'}}>{rank}</span>
+      <div>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}>
+          <span style={{fontSize:13,fontWeight:600,color:'#1e293b'}}>{label}</span>
+          {code&&<span style={{fontSize:11,fontFamily:'JetBrains Mono,monospace',color:'#be185d'}}>{code}</span>}
+        </div>
+        <div style={{height:7,background:'#f1f5f9',borderRadius:10,overflow:'hidden'}}>
+          <div style={{height:'100%',width:`${pct}%`,borderRadius:10,background:color,transition:'width .6s cubic-bezier(.16,1,.3,1)'}}/>
+        </div>
+      </div>
+      <span style={{fontSize:14,fontWeight:800,color:'#1e293b',minWidth:50,textAlign:'right'}}>{fmt(value)}</span>
+    </div>
+  );
+};
+
+/* ── Tabs & Periods ───────────────────────────────────────────── */
+const TABS = [
+  {key:'overview', label:'Tổng quan',  icon:<ChartBar size={15} weight="fill"/>},
+  {key:'inbound',  label:'Nhập kho',   icon:<ArrowSquareIn size={15} weight="fill"/>},
+  {key:'outbound', label:'Xuất kho',   icon:<ArrowSquareOut size={15} weight="fill"/>},
+  {key:'inventory',label:'Tồn kho',    icon:<Package size={15} weight="fill"/>},
+];
+const PERIODS = [{key:7,label:'7 ngày'},{key:14,label:'14 ngày'},{key:30,label:'30 ngày'}];
+
+/* ── Main ─────────────────────────────────────────────────────── */
+export default function Reports() {
+  const [tab,setTab]     = useState('overview');
+  const [days,setDays]   = useState(7);
+  const [loading,setLoading] = useState(true);
+  const [inbounds,setIn]     = useState([]);
+  const [outbounds,setOut]   = useState([]);
+  const [stocks,setStocks]   = useState([]);
+
+  const load = useCallback(async()=>{
+    setLoading(true);
+    const [iRes,oRes,stRes] = await Promise.allSettled([
+      api.get('/inbound-receipts?limit=500'),
+      api.get('/outbound-issues?limit=500'),
+      api.get('/material-stock'),
+    ]);
+    const unwrap = r => {
+      if(r.status!=='fulfilled') return [];
+      const v = r.value;
+      const d = v?.data?.data ?? v?.data ?? v;
+      return Array.isArray(d)?d:[];
+    };
+    setIn(unwrap(iRes));
+    setOut(unwrap(oRes));
+    setStocks(unwrap(stRes));
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  /* ── Computed ─────────────────────────────────────────────── */
+  // Inbound: status 'confirmed' = done
+  const inDone      = inbounds.filter(r=>r.status==='confirmed'||r.status==='completed');
+  const inDraft     = inbounds.filter(r=>r.status==='draft').length;
+  const inConfirmed = inDone.length;
+  const inCancelled = inbounds.filter(r=>r.status==='cancelled').length;
+  const totalInVal  = inDone.reduce((s,r)=>s+(r.total_cost||r.total_amount||0),0);
+  const totalInQty  = inDone.reduce((s,r)=>s+(r.total_quantity||0),0);
+
+  // Outbound
+  const outDone      = outbounds.filter(r=>r.status==='confirmed'||r.status==='completed');
+  const outDraft     = outbounds.filter(r=>r.status==='draft').length;
+  const outConfirmed = outDone.length;
+  const outCancelled = outbounds.filter(r=>r.status==='cancelled').length;
+  const totalOutVal  = outDone.reduce((s,r)=>s+(r.total_cost||r.total_amount||0),0);
+  const totalOutQty  = outDone.reduce((s,r)=>s+(r.total_quantity||0),0);
+
+  // Stock: field is total_value (not total_cost)
+  const validStocks  = stocks.filter(s=>s.material_id);
+  const totalStockVal= stocks.reduce((s,st)=>s+(st.total_value||st.total_cost||0),0);
+  const outOfStock   = stocks.filter(s=>s.out_of_stock||(s.quantity_on_hand||0)===0).length;
+  const lowStockList = stocks
+    .filter(s=>s.material_id&&(s.low_stock_alert||(s.quantity_on_hand<(s.min_stock||5)&&s.quantity_on_hand>0)))
+    .sort((a,b)=>(a.quantity_on_hand||0)-(b.quantity_on_hand||0))
+    .slice(0,10);
+  const topMatList   = [...validStocks]
+    .sort((a,b)=>(b.quantity_on_hand||0)-(a.quantity_on_hand||0))
+    .slice(0,8);
+  const maxTopQty = Math.max(...topMatList.map(s=>s.quantity_on_hand||0),1);
+  const maxLowQty = Math.max(...lowStockList.map(s=>s.quantity_on_hand||0),1);
+
+  // Chart: group inbound + outbound by date within `days` window
+  const chartData = (() => {
+    const now = new Date();
+    const map = {};
+    for(let i=days-1;i>=0;i--){
+      const d = new Date(now); d.setDate(d.getDate()-i);
+      const key = d.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'});
+      map[key] = {date:key, nhap:0, xuat:0};
+    }
+    inDone.forEach(r=>{
+      const d = r.receipt_date||r.createdAt;
+      if(!d) return;
+      const key = new Date(d).toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'});
+      if(map[key]) map[key].nhap += r.total_quantity||0;
+    });
+    outDone.forEach(r=>{
+      const d = r.issue_date||r.createdAt;
+      if(!d) return;
+      const key = new Date(d).toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'});
+      if(map[key]) map[key].xuat += r.total_quantity||0;
+    });
+    return Object.values(map);
+  })();
+
+  const hasChartData = chartData.some(d=>d.nhap>0||d.xuat>0);
+
+  /* ── Render ───────────────────────────────────────────────── */
+  return (
+    <div style={{minHeight:'100vh',background:'#f8fafc',fontFamily:'Outfit,sans-serif'}}>
+
+      {/* Header */}
+      <div style={{background:'#fff',borderBottom:'1px solid #e2e8f0'}}>
+        <div style={{padding:'22px 32px'}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}}>
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                <div style={{width:10,height:10,borderRadius:'50%',background:'linear-gradient(135deg,#be185d,#9d174d)',boxShadow:'0 0 0 3px #fdf2f8',animation:'pulse-dot 2s infinite'}}/>
+                <span style={{fontSize:11,fontWeight:700,color:'#be185d',textTransform:'uppercase',letterSpacing:'1.5px'}}>Live Report</span>
+              </div>
+              <h1 style={{margin:0,fontSize:28,fontWeight:800,color:'#0f172a',letterSpacing:'-1px'}}>Báo Cáo</h1>
+              <p style={{margin:'4px 0 0',fontSize:13,color:'#94a3b8'}}>Phân tích dữ liệu kho hàng theo thời gian thực</p>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <div style={{display:'flex',background:'#f1f5f9',borderRadius:10,padding:3,gap:2}}>
+                {PERIODS.map(p=>(
+                  <button key={p.key} onClick={()=>setDays(p.key)}
+                    style={{padding:'6px 14px',borderRadius:8,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:days===p.key?'#fff':'transparent',color:days===p.key?'#be185d':'#64748b',boxShadow:days===p.key?'0 1px 4px rgba(0,0,0,.08)':'none',transition:'all .2s'}}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={load}
+                style={{width:38,height:38,borderRadius:9,border:'1.5px solid #e2e8f0',background:'#fff',color:'#64748b',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s'}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor='#be185d'}
+                onMouseLeave={e=>e.currentTarget.style.borderColor='#e2e8f0'}>
+                <ArrowClockwise size={16} style={{animation:loading?'spin 1s linear infinite':'none'}}/>
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{display:'flex',gap:4}}>
+            {TABS.map(t=>(
+              <button key={t.key} onClick={()=>setTab(t.key)}
+                style={{display:'flex',alignItems:'center',gap:7,padding:'8px 16px',borderRadius:10,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:tab===t.key?'#fdf2f8':'transparent',color:tab===t.key?'#be185d':'#64748b',borderBottom:tab===t.key?'2px solid #be185d':'2px solid transparent',transition:'all .2s'}}>
+                {t.icon}{t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{padding:'28px 32px'}}>
+
+        {/* ── OVERVIEW ── */}
+        {tab==='overview'&&(
+          <div style={{animation:'fadeUp .35s ease'}}>
+            {/* KPI */}
+            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:16,marginBottom:24}}>
+              <KPICard loading={loading}
+                icon={<ChartBar size={20} color="#be185d" weight="fill"/>}
+                label="Giá trị tồn kho hiện tại"
+                value={fmtCur(totalStockVal)} accent="#be185d"
+                sub={`${fmt(validStocks.length)} mặt hàng đang theo dõi`}/>
+              <KPICard loading={loading}
+                icon={<ArrowSquareIn size={20} color="#16a34a" weight="fill"/>}
+                label="Giá trị nhập kho"
+                value={fmtCur(totalInVal)} accent="#16a34a"
+                sub={`${inConfirmed} phiếu hoàn thành`}/>
+              <KPICard loading={loading}
+                icon={<ArrowSquareOut size={20} color="#0ea5e9" weight="fill"/>}
+                label="Giá trị xuất kho"
+                value={fmtCur(totalOutVal)} accent="#0ea5e9"
+                sub={`${outConfirmed} phiếu hoàn thành`}/>
+              <KPICard loading={loading}
+                icon={<Warning size={20} color="#f59e0b" weight="fill"/>}
+                label="Mặt hàng cảnh báo"
+                value={fmt(lowStockList.length)}
+                accent="#f59e0b"
+                sub={`${fmt(outOfStock)} hết hàng hoàn toàn`}/>
+            </div>
+
+            {/* Chart + Top */}
+            <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:20,marginBottom:20}}>
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+                  <div>
+                    <div style={{fontSize:15,fontWeight:800,color:'#0f172a'}}>Biến động nhập / xuất</div>
+                    <div style={{fontSize:12,color:'#94a3b8',marginTop:2}}>{days} ngày gần nhất</div>
+                  </div>
+                  <TrendUp size={18} color="#be185d" weight="fill"/>
+                </div>
+                {loading
+                  ? <Shimmer h={200} r={12}/>
+                  : <LineChart data={hasChartData?chartData:[]} keys={['nhap','xuat']} colors={['#be185d','#0ea5e9']} labels={['Nhập kho','Xuất kho']}/>
+                }
+              </div>
+
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+                  <div>
+                    <div style={{fontSize:15,fontWeight:800,color:'#0f172a'}}>Top vật tư tồn nhiều</div>
+                    <div style={{fontSize:12,color:'#94a3b8',marginTop:2}}>Theo số lượng hiện tại</div>
+                  </div>
+                  <Package size={18} color="#0ea5e9" weight="fill"/>
+                </div>
+                {loading
+                  ? [...Array(5)].map((_,i)=><Shimmer key={i} h={32} r={8} style={{marginBottom:12}}/>)
+                  : topMatList.length===0
+                    ? <EmptySlate text="Chưa có dữ liệu tồn kho"/>
+                    : topMatList.map((s,i)=>(
+                        <HBar key={s._id} rank={i+1}
+                          label={s.material_id?.product_name||s.material_id?.material_name||'—'}
+                          code={s.material_id?.product_code||s.material_id?.material_code}
+                          value={s.quantity_on_hand||0} maxVal={maxTopQty}
+                          color="linear-gradient(90deg,#0ea5e9,#38bdf8)"/>
+                      ))
+                }
+              </div>
+            </div>
+
+            {/* Low stock */}
+            <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800,color:'#0f172a'}}>Sắp hết hàng</div>
+                  <div style={{fontSize:12,color:'#94a3b8',marginTop:2}}>Xếp theo số lượng tồn tăng dần</div>
+                </div>
+                {!loading&&lowStockList.length>0&&(
+                  <span style={{fontSize:12,padding:'3px 10px',borderRadius:20,background:'#fef3c7',color:'#d97706',fontWeight:700}}>
+                    {lowStockList.length} mặt hàng
+                  </span>
+                )}
+              </div>
+              {loading
+                ? <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>{[...Array(6)].map((_,i)=><Shimmer key={i} h={36} r={8}/>)}</div>
+                : lowStockList.length===0
+                  ? <EmptySlate text="Tất cả vật tư đều còn đủ hàng ✓"/>
+                  : <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 32px'}}>
+                      {lowStockList.map((s,i)=>(
+                        <HBar key={s._id} rank={i+1}
+                          label={s.material_id?.product_name||s.material_id?.material_name||'—'}
+                          code={s.material_id?.product_code||s.material_id?.material_code}
+                          value={s.quantity_on_hand||0} maxVal={maxLowQty}
+                          color="linear-gradient(90deg,#f59e0b,#fbbf24)"/>
+                      ))}
+                    </div>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* ── INBOUND TAB ── */}
+        {tab==='inbound'&&(
+          <div style={{animation:'fadeUp .35s ease'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
+              <KPICard loading={loading} icon={<ArrowSquareIn size={20} color="#16a34a" weight="fill"/>}
+                label="Tổng phiếu nhập" value={fmt(inbounds.length)} accent="#16a34a" sub="Tất cả trạng thái"/>
+              <KPICard loading={loading} icon={<TrendUp size={20} color="#be185d" weight="fill"/>}
+                label="Giá trị đã nhập" value={fmtCur(totalInVal)} accent="#be185d" sub={`${fmt(totalInQty)} đơn vị`}/>
+              <KPICard loading={loading} icon={<ChartBar size={20} color="#8b5cf6" weight="fill"/>}
+                label="Tỉ lệ hoàn thành"
+                value={inbounds.length?`${Math.round(inConfirmed/inbounds.length*100)}%`:'—'} accent="#8b5cf6"
+                sub={`${inConfirmed} xác nhận · ${inDraft} nháp · ${inCancelled} huỷ`}/>
+            </div>
+
+            <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:20}}>
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:20}}>Danh sách phiếu nhập gần đây</div>
+                {loading
+                  ? [...Array(6)].map((_,i)=><Shimmer key={i} h={44} r={8} style={{marginBottom:10}}/>)
+                  : inbounds.length===0
+                    ? <EmptySlate text="Chưa có phiếu nhập nào"/>
+                    : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                        <thead>
+                          <tr style={{borderBottom:'2px solid #f1f5f9'}}>
+                            {['Mã phiếu','Đối tác','Ngày nhập','Giá trị','Trạng thái'].map(h=>(
+                              <th key={h} style={{padding:'8px 12px',fontSize:11,fontWeight:700,color:'#94a3b8',textAlign:'left',textTransform:'uppercase',letterSpacing:'.5px'}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inbounds.slice(0,15).map(r=>(
+                            <tr key={r._id} style={{borderBottom:'1px solid #f8fafc'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='#fafbfc'}
+                              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'11px 12px'}}>
+                                <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,fontWeight:700,color:'#be185d',background:'#fdf2f8',padding:'2px 8px',borderRadius:5}}>{r.receipt_code}</span>
+                              </td>
+                              <td style={{padding:'11px 12px',fontSize:13,color:'#374151'}}>{r.partner_id?.name||r.partner_id?.object_name||'—'}</td>
+                              <td style={{padding:'11px 12px',fontSize:12,color:'#94a3b8'}}>{fmtDate(r.receipt_date||r.createdAt)}</td>
+                              <td style={{padding:'11px 12px',fontSize:13,fontWeight:700,color:'#16a34a'}}>{fmtCur(r.total_cost||r.total_amount)}</td>
+                              <td style={{padding:'11px 12px'}}><StatusPill status={r.status}/></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                }
+              </div>
+
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:20}}>Phân bố trạng thái</div>
+                {loading
+                  ? [...Array(3)].map((_,i)=><Shimmer key={i} h={56} r={10} style={{marginBottom:12}}/>)
+                  : [{label:'Đã xác nhận',count:inConfirmed,color:'#16a34a',bg:'#dcfce7'},
+                     {label:'Nháp',        count:inDraft,     color:'#d97706',bg:'#fef3c7'},
+                     {label:'Đã huỷ',      count:inCancelled, color:'#dc2626',bg:'#fee2e2'},
+                    ].map(s=>(
+                      <div key={s.label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 16px',background:s.bg,borderRadius:12,marginBottom:10}}>
+                        <span style={{fontSize:14,fontWeight:600,color:s.color}}>{s.label}</span>
+                        <span style={{fontSize:24,fontWeight:800,color:s.color}}>{s.count}</span>
+                      </div>
+                    ))
+                }
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── OUTBOUND TAB ── */}
+        {tab==='outbound'&&(
+          <div style={{animation:'fadeUp .35s ease'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
+              <KPICard loading={loading} icon={<ArrowSquareOut size={20} color="#0ea5e9" weight="fill"/>}
+                label="Tổng phiếu xuất" value={fmt(outbounds.length)} accent="#0ea5e9" sub="Tất cả trạng thái"/>
+              <KPICard loading={loading} icon={<TrendDown size={20} color="#be185d" weight="fill"/>}
+                label="Giá trị đã xuất" value={fmtCur(totalOutVal)} accent="#be185d" sub={`${fmt(totalOutQty)} đơn vị`}/>
+              <KPICard loading={loading} icon={<ChartBar size={20} color="#8b5cf6" weight="fill"/>}
+                label="Tỉ lệ hoàn thành"
+                value={outbounds.length?`${Math.round(outConfirmed/outbounds.length*100)}%`:'—'} accent="#8b5cf6"
+                sub={`${outConfirmed} xác nhận · ${outDraft} nháp · ${outCancelled} huỷ`}/>
+            </div>
+
+            <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:20}}>
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:20}}>Danh sách phiếu xuất gần đây</div>
+                {loading
+                  ? [...Array(6)].map((_,i)=><Shimmer key={i} h={44} r={8} style={{marginBottom:10}}/>)
+                  : outbounds.length===0
+                    ? <EmptySlate text="Chưa có phiếu xuất nào"/>
+                    : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                        <thead>
+                          <tr style={{borderBottom:'2px solid #f1f5f9'}}>
+                            {['Mã phiếu','Đối tác','Ngày xuất','Giá trị','Trạng thái'].map(h=>(
+                              <th key={h} style={{padding:'8px 12px',fontSize:11,fontWeight:700,color:'#94a3b8',textAlign:'left',textTransform:'uppercase',letterSpacing:'.5px'}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {outbounds.slice(0,15).map(r=>(
+                            <tr key={r._id} style={{borderBottom:'1px solid #f8fafc'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='#fafbfc'}
+                              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'11px 12px'}}>
+                                <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,fontWeight:700,color:'#0ea5e9',background:'#e0f2fe',padding:'2px 8px',borderRadius:5}}>{r.issue_code}</span>
+                              </td>
+                              <td style={{padding:'11px 12px',fontSize:13,color:'#374151'}}>{r.partner_id?.name||r.partner_id?.object_name||r.customer_id?.name||'—'}</td>
+                              <td style={{padding:'11px 12px',fontSize:12,color:'#94a3b8'}}>{fmtDate(r.issue_date||r.createdAt)}</td>
+                              <td style={{padding:'11px 12px',fontSize:13,fontWeight:700,color:'#0ea5e9'}}>{fmtCur(r.total_cost||r.total_amount)}</td>
+                              <td style={{padding:'11px 12px'}}><StatusPill status={r.status}/></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                }
+              </div>
+
+              <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+                <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:20}}>Phân bố trạng thái</div>
+                {loading
+                  ? [...Array(3)].map((_,i)=><Shimmer key={i} h={56} r={10} style={{marginBottom:12}}/>)
+                  : [{label:'Đã xác nhận',count:outConfirmed,color:'#16a34a',bg:'#dcfce7'},
+                     {label:'Nháp',        count:outDraft,    color:'#d97706',bg:'#fef3c7'},
+                     {label:'Đã huỷ',      count:outCancelled,color:'#dc2626',bg:'#fee2e2'},
+                    ].map(s=>(
+                      <div key={s.label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 16px',background:s.bg,borderRadius:12,marginBottom:10}}>
+                        <span style={{fontSize:14,fontWeight:600,color:s.color}}>{s.label}</span>
+                        <span style={{fontSize:24,fontWeight:800,color:s.color}}>{s.count}</span>
+                      </div>
+                    ))
+                }
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── INVENTORY TAB ── */}
+        {tab==='inventory'&&(
+          <div style={{animation:'fadeUp .35s ease'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:16,marginBottom:24}}>
+              <KPICard loading={loading} icon={<Package size={20} color="#be185d" weight="fill"/>}
+                label="Tổng mặt hàng" value={fmt(stocks.length)} accent="#be185d"/>
+              <KPICard loading={loading} icon={<ChartBar size={20} color="#0ea5e9" weight="fill"/>}
+                label="Giá trị tồn kho" value={fmtCur(totalStockVal)} accent="#0ea5e9"/>
+              <KPICard loading={loading} icon={<Warning size={20} color="#f59e0b" weight="fill"/>}
+                label="Sắp hết hàng" value={fmt(lowStockList.length)} accent="#f59e0b"/>
+              <KPICard loading={loading} icon={<Warning size={20} color="#dc2626" weight="fill"/>}
+                label="Hết hàng" value={fmt(outOfStock)} accent="#dc2626"/>
+            </div>
+
+            <div style={{background:'#fff',borderRadius:20,padding:'22px 24px',border:'1px solid #e2e8f0',boxShadow:'0 4px 24px -8px rgba(0,0,0,.06)'}}>
+              <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:20}}>Chi tiết tồn kho</div>
+              {loading
+                ? [...Array(8)].map((_,i)=><Shimmer key={i} h={40} r={8} style={{marginBottom:10}}/>)
+                : stocks.length===0
+                  ? <EmptySlate text="Chưa có dữ liệu tồn kho"/>
+                  : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead>
+                        <tr style={{borderBottom:'2px solid #f1f5f9'}}>
+                          {['#','Vật tư','Kho','Tồn thực','Khả dụng','Đơn giá','Giá trị','Trạng thái'].map((h,i)=>(
+                            <th key={h} style={{padding:'9px 12px',fontSize:11,fontWeight:700,color:'#94a3b8',textAlign:i>=3?'right':'left',textTransform:'uppercase',letterSpacing:'.5px'}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stocks.map((s,i)=>{
+                          const qty   = s.quantity_on_hand||0;
+                          const avail = s.quantity_available??qty;
+                          const val   = s.total_value||s.total_cost||0;
+                          const min   = s.min_stock||0;
+                          const oos   = s.out_of_stock||qty===0;
+                          const low   = !oos&&s.low_stock_alert;
+                          const status= oos  ? {label:'Hết hàng',color:'#dc2626',bg:'#fee2e2'}
+                                      : low  ? {label:'Sắp hết', color:'#d97706',bg:'#fef3c7'}
+                                      : {label:'Đủ hàng', color:'#16a34a',bg:'#dcfce7'};
+                          return (
+                            <tr key={s._id} style={{borderBottom:'1px solid #f8fafc'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='#fafbfc'}
+                              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'11px 12px',color:'#94a3b8',fontSize:12}}>{i+1}</td>
+                              <td style={{padding:'11px 12px'}}>
+                                <div style={{fontSize:13,fontWeight:600,color:'#1e293b'}}>
+                                  {s.material_id?.product_name||s.material_id?.material_name||<span style={{color:'#cbd5e1',fontStyle:'italic'}}>Không xác định</span>}
+                                </div>
+                                {s.material_id&&<div style={{fontSize:11,fontFamily:'JetBrains Mono,monospace',color:'#be185d',marginTop:2}}>{s.material_id?.product_code||s.material_id?.material_code||''}</div>}
+                              </td>
+                              <td style={{padding:'11px 12px',fontSize:13,color:'#64748b'}}>{s.warehouse_id?.name||s.warehouse_id?.warehouse_name||'—'}</td>
+                              <td style={{padding:'11px 12px',textAlign:'right',fontWeight:700,fontSize:14,color:'#1e293b'}}>{fmt(qty)}</td>
+                              <td style={{padding:'11px 12px',textAlign:'right',fontSize:13,color:'#64748b'}}>{fmt(avail)}</td>
+                              <td style={{padding:'11px 12px',textAlign:'right',fontSize:13,color:'#64748b'}}>{s.unit_cost>0?fmtCur(s.unit_cost):'—'}</td>
+                              <td style={{padding:'11px 12px',textAlign:'right',fontSize:13,fontWeight:600,color:'#0ea5e9'}}>{val>0?fmtCur(val):'—'}</td>
+                              <td style={{padding:'11px 12px',textAlign:'right'}}>
+                                <span style={{fontSize:11,padding:'3px 9px',borderRadius:20,fontWeight:700,background:status.bg,color:status.color}}>{status.label}</span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+              }
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes shimmer   { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        @keyframes fadeUp    { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes spin      { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
+      `}</style>
+    </div>
+  );
+}

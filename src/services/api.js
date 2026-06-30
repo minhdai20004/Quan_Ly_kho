@@ -3,7 +3,8 @@ const BASE_URL = '/api';
 async function apiRequest(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
 
-  const token = JSON.parse(localStorage.getItem('user') || '{}')?.token;
+  const userObj = JSON.parse(localStorage.getItem('user') || '{}');
+  const token = userObj?.token || localStorage.getItem('token');
 
   const config = {
     headers: {
