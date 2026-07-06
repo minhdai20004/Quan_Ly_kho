@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Toaster } from 'sonner';
 import Navbar from './components/Navbar';
 import Dashboard from './views/Dashboard';
 import Materials from './views/Materials';
@@ -22,10 +23,8 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const handleLogin = (userData) => {
-    // userData từ Login.jsx có thể là { token, user } hoặc { token, username, role }
     const token = userData.token;
-    const loggedUser  = userData.user || { username: userData.username, role: userData.role };
-
+    const loggedUser = userData.user || { username: userData.username, role: userData.role };
     setUser({ ...loggedUser, token });
     setIsLoggedIn(true);
     localStorage.setItem('user', JSON.stringify({ ...loggedUser, token }));
@@ -40,47 +39,56 @@ function App() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard':
-        return <Dashboard user={user} />;
-      case 'materials':
-        return <Materials user={user} />;
-      case 'warehouses':
-        return <Warehouses user={user} />;
-      case 'partners':
-        return <Partners user={user} />;
-      case 'inbound':
-        return <InboundReceipts user={user} />;
-      case 'outbound':
-        return <OutboundIssues user={user} />;
-      case 'inventory':
-        return <Inventory user={user} />;
-      case 'reports':
-        return <Reports user={user} />;
-      case 'users':
-        return <Users user={user} />;
-      case 'register':
-        return <Register onRegister={() => setActiveTab('dashboard')} />;
-      default:
-        return <Dashboard user={user} />;
+      case 'dashboard':    return <Dashboard user={user} />;
+      case 'materials':    return <Materials user={user} />;
+      case 'warehouses':   return <Warehouses user={user} />;
+      case 'partners':     return <Partners user={user} />;
+      case 'inbound':      return <InboundReceipts user={user} />;
+      case 'outbound':     return <OutboundIssues user={user} />;
+      case 'inventory':    return <Inventory user={user} />;
+      case 'reports':      return <Reports user={user} />;
+      case 'users':        return <Users user={user} />;
+      case 'register':     return <Register onRegister={() => setActiveTab('dashboard')} />;
+      default:             return <Dashboard user={user} />;
     }
   };
 
   if (!isLoggedIn) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <>
+        <Toaster position="bottom-right" richColors closeButton />
+        <Login onLogin={handleLogin} />
+      </>
+    );
   }
 
   return (
-    <div className="app">
-      <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onLogout={handleLogout}
-        user={user}
+    <>
+      {/* Toaster đặt ở đây — hiển thị toast notification toàn app */}
+      <Toaster
+        position="bottom-right"
+        richColors
+        closeButton
+        duration={3000}
+        toastOptions={{
+          style: {
+            fontFamily: 'Outfit, sans-serif',
+            fontSize: 14,
+          },
+        }}
       />
-      <main className="main-content">
-        {renderContent()}
-      </main>
-    </div>
+      <div className="app">
+        <Navbar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onLogout={handleLogout}
+          user={user}
+        />
+        <main className="main-content">
+          {renderContent()}
+        </main>
+      </div>
+    </>
   );
 }
 
